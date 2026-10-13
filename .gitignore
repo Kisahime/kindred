@@ -1,0 +1,39 @@
+# dependencies / build output
+node_modules/
+dist/
+dist-test/
+src-tauri/target/
+src-tauri/gen/
+
+# user data, never commit
+data/
+backups/
+backups-data/
+recovery/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# engines and models (downloaded by each user)
+engine/sd-cuda12/*
+!engine/sd-cuda12/README.md
+engine/voice/venv/
+engine/voice/models/
+engine/voice/config.json
+*.safetensors
+*.gguf
+*.ckpt
+*.onnx
+*.bin
+__pycache__/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# launcher
+launcher.log
+.launcher-build-stamp

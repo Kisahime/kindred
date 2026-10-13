@@ -1,0 +1,9 @@
+# Voice helper (Kokoro TTS + faster-whisper STT). Python 3.11, Windows.
+faster-whisper==1.2.1
+kokoro-onnx==0.6.1
+ctranslate2==4.*
+onnxruntime
+numpy
+# Optional, NVIDIA GPU speech recognition (CUDA 12):
+# nvidia-cublas-cu12
+# nvidia-cudnn-cu12==9.*
