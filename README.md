@@ -2,8 +2,18 @@
 
 A cosy, messenger-style Windows app for chatting with AI characters that run **entirely on your own PC**. No accounts, no cloud: chats are stored locally and the AI runs through [Ollama](https://ollama.com).
 
-![screenshot](docs/screenshots/main.png)
-*(screenshots coming soon)*
+![Kindred: contact list and chat](docs/screenshots/main.png)
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Together mode](docs/screenshots/together.png)<br>Together mode: a meet-up at the park with narrator and place background | ![Group chat](docs/screenshots/group.png)<br>Group chat |
+| ![Sparkles café](docs/screenshots/cafe.png)<br>The Sparkles café | ![Shopping Centre](docs/screenshots/shop.png)<br>Shopping Centre |
+| ![Character editor](docs/screenshots/editor.png)<br>Character editor | ![Image Studio](docs/screenshots/studio.png)<br>Image Studio |
+| ![Night theme](docs/screenshots/theme-night.png)<br>Night theme | ![Pastel Cosy theme](docs/screenshots/theme-pastel.png)<br>Pastel Cosy theme |
+| ![Forest Mint theme](docs/screenshots/theme-mint.png)<br>Forest Mint theme | |
+
 
 ## Features
 
