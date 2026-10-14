@@ -6,7 +6,7 @@ import { Avatar } from "./Avatar";
 import { Character } from "./types";
 import { aboutUserBlock, FIELDS, FieldId, parseBirthday, UserProfile } from "./profile";
 
-const LONG: FieldId[] = ["about", "boundaries", "traits", "likes", "dislikes", "hobbies"];
+const LONG: FieldId[] = ["about", "boundaries", "traits", "likes", "dislikes", "hobbies", "photoLook"];
 
 export function MeEditor({ initial, chars, onSave, onClose }: { initial: UserProfile; chars: Character[]; onSave: (p: UserProfile) => Promise<void>; onClose: () => void }) {
   const [p, setP] = useState<UserProfile>(structuredClone(initial));

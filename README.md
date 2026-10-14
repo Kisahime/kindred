@@ -9,6 +9,9 @@ A cosy, messenger-style Windows app for chatting with AI characters that run **e
 
 - Classic messenger look: contact list, statuses, nudges, emoticons, sounds, tray icon and notifications.
 - Characters with personalities, moods, memories and their own daily life; they can message you first.
+- **Together mode**: meet characters in person at places (cafe, park, cinema, your own…) with a scene card, optional narrator, recap, meet-up costs and invites from characters.
+- Plans: arrange a meet-up for later; it starts when it is due.
+- Places and photos: optional generated place backgrounds behind a scene and photos together during a scene (same safeguards as selfies).
 - Group chats, a social feed and phone-style voice calls (optional).
 - Character editor, a template gallery of sample characters and AI-assisted character creation.
 - Image Studio: generate character pictures and selfies with stable-diffusion.cpp (optional). Every image keeps the prompt used.
@@ -97,7 +100,7 @@ Tests:
 ```powershell
 npx tsc --noEmit
 npx esbuild scripts/test-entry.ts --bundle --platform=node --format=esm --outfile=dist-test/all.js "--external:@tauri-apps/*"
-node scripts/test-economy.mjs     # also test-setup, test-voice, test-call, test-group, test-life, test-mind (live parts need Ollama)
+node scripts/test-economy.mjs     # also test-together, test-setup, test-selfie, test-voice, test-call, test-group, test-life, test-mind (live parts need Ollama)
 cd src-tauri; cargo test
 ```
 

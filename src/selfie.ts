@@ -1,4 +1,5 @@
 // Character selfies: intent detection, prompt building and image settings.
+import { invoke } from "@tauri-apps/api/core";
 import { api } from "./api";
 import { parseJson } from "./mind";
 import { appearanceOf, Appearance, Character, Mood, MIN_AGE } from "./types";
@@ -164,7 +165,6 @@ export function selfieNote(userName: string, ok: boolean, gift?: GiftShot): stri
 }
 /** One line per selfie in data\\logs\\selfie.log: who, which gift (and whether it was allowed), the prompt. */
 export async function logSelfie(c: Character, p: SelfiePrompt, gift?: GiftShot): Promise<void> {
-  const { invoke } = await import("@tauri-apps/api/core");
   const g = gift?.item ? `${gift.item.name} (#${gift.item.id}${isAdultItem(gift.item) ? ", 18+" : ""}) ${gift.allowed ? "WORN" : "BLOCKED"}` : "none";
   await invoke("selfie_log", { line: `${new Date().toISOString()} | ${c.name} | gift: ${g} | caption: ${p.caption} | prompt: ${p.prompt} | negative: ${p.negative}` });
 }

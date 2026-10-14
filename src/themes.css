@@ -1,5 +1,6 @@
 /* Themes: every surface reads these variables. Aero Blue is the default. */
 :root, [data-theme="aero"] {
+  --act: #6b4fa0; --scene-bg: rgba(255,244,226,.55); --scene-border: #f6e7c8;
   --bg: linear-gradient(180deg, #dff1ff 0%, #bfe1fb 45%, #e9f6ff 100%);
   --text: #1d2b3a; --muted: #6a7d90; --accent: #3b8bd0; --accent-text: #2a6fb0;
   --title: linear-gradient(180deg,#5aa9e6,#3b8bd0); --title-text: #fff;
@@ -12,6 +13,7 @@
   --primary: linear-gradient(180deg,#6cb6ee,#3b8bd0); --group-title: #2a5d8a; --input: #fff;
 }
 [data-theme="night"] {
+  --act: #c7a8f0; --scene-bg: rgba(60,46,30,.35); --scene-border: #5a4a2e;
   --bg: linear-gradient(180deg, #141b26 0%, #1a2433 60%, #111722 100%);
   --text: #dce6f2; --muted: #8b9bb0; --accent: #5b8fd9; --accent-text: #8fb8f0;
   --title: linear-gradient(180deg,#2c3e5c,#1e2c45); --title-text: #e8f0ff;
@@ -24,6 +26,7 @@
   --primary: linear-gradient(180deg,#4f86d6,#3a6bb8); --group-title: #9fbbe0; --input: #1b2330;
 }
 [data-theme="pastel"] {
+  --act: #8a4f9e; --scene-bg: rgba(255,240,230,.55); --scene-border: #f2d6c4;
   --bg: linear-gradient(180deg, #fde8f1 0%, #efe3fb 55%, #fdf3f8 100%);
   --text: #4a3550; --muted: #9a7f9f; --accent: #c77dba; --accent-text: #a5559a;
   --title: linear-gradient(180deg,#e9a6cf,#b98ad8); --title-text: #fff;
@@ -36,6 +39,7 @@
   --primary: linear-gradient(180deg,#e39ccb,#b685d6); --group-title: #9c5f97; --input: #fff;
 }
 [data-theme="mint"] {
+  --act: #5b5aa0; --scene-bg: rgba(255,248,228,.55); --scene-border: #e8dcb0;
   --bg: linear-gradient(180deg, #e5f6ec 0%, #cfeedd 50%, #eef9f2 100%);
   --text: #1f3a2c; --muted: #678b77; --accent: #3e9b6b; --accent-text: #2c7f55;
   --title: linear-gradient(180deg,#5cbf8a,#2f8f60); --title-text: #fff;

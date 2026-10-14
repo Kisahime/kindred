@@ -455,7 +455,9 @@ async fn run_job(db: &Db, exe: &str, params: &GenParams, ch: &Channel<Progress>)
         }
     }
     let stamp = now();
-    let out_dir = db.images_dir();
+    // place backgrounds (together3) are cached in data\images\places; everything else in data\images
+    let is_place = params.meta.as_ref().and_then(|m| m.get("source")).and_then(|v| v.as_str()) == Some("place");
+    let out_dir = if is_place { db.images_dir().join("places") } else { db.images_dir() };
     std::fs::create_dir_all(&out_dir).map_err(e)?;
     let prefix = format!("img_{stamp}_");
     let pattern = out_dir.join(format!("{prefix}%02d.png")).display().to_string();

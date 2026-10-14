@@ -1,5 +1,6 @@
 import { blankLife, nowPrompt, relationshipPrompt } from "./lifecore";
 import type { Life } from "./lifecore";
+import { parseSceneMarker, SCENE, sceneNarration } from "./together";
 export type Frequency = "rarely" | "sometimes" | "often";
 export type Status = "online" | "away" | "busy" | "offline";
 export type Mood = "happy" | "cosy" | "playful" | "sad" | "annoyed" | "sleepy" | "excited";
@@ -66,6 +67,7 @@ export const hasLooks = (a: Appearance) => !!(a.body || a.face || a.features || 
 export interface StoredMessage {
   id: number; characterId: string; role: "user" | "assistant"; content: string; createdAt: number; isError: boolean; isUnread: boolean; isProactive: boolean;
   reaction: string; alternates: string[]; altIndex: number; imagePath?: string | null;
+  sceneId?: string; // Together-mode scene id ("" = messenger)
 }
 
 export interface Memory { id: number; characterId: string; content: string; createdAt: number; pinned: boolean; source: string; }
@@ -115,21 +117,26 @@ export function parseCall(content: string): CallLog | null {
 }
 export const fmtDuration = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 /** Gift / offer bubbles are events, sent to the model as system narration (never as a user/assistant line). */
-export const isEventText = (content: string) => content.startsWith(GIFT) || content.startsWith(OFFER);
+export const isEventText = (content: string) => content.startsWith(GIFT) || content.startsWith(OFFER) || content.startsWith(SCENE);
 const OUTCOME: Record<string, string> = { accepted: "accepted", declined: "declined", expired: "could not accept (no longer had the item)", pending: "has not answered yet" };
 /** Unambiguous narration for a gift/offer: who gave what to whom, and the answer if known. */
 export function eventText(content: string, fromUser: boolean, userName: string, charName: string, status?: string): string {
-  const what = content.slice(content.startsWith(GIFT) ? GIFT.length : OFFER.length).trim();
+  const what0 = content.slice(content.startsWith(GIFT) ? GIFT.length : OFFER.length).trim();
+  const inPerson = what0.endsWith("(in person)"); // together3: handed over during a meet-up
+  const what = inPerson ? what0.slice(0, -"(in person)".length).trim() : what0;
   if (content.startsWith(GIFT)) {
+    if (fromUser && inPerson) return `[Event: ${userName} hands ${charName} the ${what} in person. It now belongs to you, ${charName}.]`;
     if (fromUser) return `[Event: ${userName} gave you (${charName}) a gift: ${what}. It now belongs to you, ${charName}.]`;
     const ans = status && status !== "pending" ? ` ${userName} ${OUTCOME[status] ?? status} it${status === "accepted" ? `, so it now belongs to ${userName}` : ""}.` : "";
-    return `[Event: You (${charName}) gave ${userName} a gift: ${what}.${ans}]`;
+    return inPerson ? `[Event: You (${charName}) hand ${userName} a present in person: ${what}.${ans}]` : `[Event: You (${charName}) gave ${userName} a gift: ${what}.${ans}]`;
   }
   const body = what.replace(/^\S+\s/, "").replace(/\byour\b/, `${userName}'s`).replace(/\btheir\b/, "your");
   const ans = status ? ` ${userName} ${OUTCOME[status] ?? status}${status === "pending" ? "" : " the offer"}.` : "";
   return `[Event: You (${charName}) made ${userName} an offer: you ${body}.${ans}]`;
 }
 export function toModelText(content: string, fromUser: boolean, userName: string, charName: string, status?: string): string {
+  const scene = parseSceneMarker(content);
+  if (scene) return sceneNarration(scene, userName, charName);
   if (isEventText(content)) return eventText(content, fromUser, userName, charName, status);
   const call = parseCall(content);
   if (call) {
@@ -156,7 +163,7 @@ export function closenessLabel(n: number): string {
   return n < 15 ? "stranger" : n < 35 ? "acquaintance" : n < 55 ? "friend" : n < 75 ? "good friend" : n < 90 ? "close friend" : "best friend";
 }
 
-export interface PromptExtras { memories?: string[]; now?: Date; }
+export interface PromptExtras { memories?: string[]; now?: Date; /** Together mode: the in-person block (replaces the messenger framing). */ together?: string; }
 
 /** Builds the system prompt from the editor fields, plus memories and the current mood. */
 function looks(c: Character): string {
@@ -172,20 +179,20 @@ export function buildSystemPrompt(c: Character, userName: string, extras: Prompt
   const user = userName || "the user";
   const now = extras.now ?? new Date();
   const parts = [
-    `You are ${c.name}, chatting with ${user} over an instant messenger.`,
+    extras.together ? `You are ${c.name}, spending time with ${user} in person.` : `You are ${c.name}, chatting with ${user} over an instant messenger.`,
     c.personality && `Personality: ${c.personality}`,
     c.backstory && `Backstory: ${c.backstory}`,
     c.speakingStyle && `Speaking style: ${c.speakingStyle}`,
     c.exampleMessages && `Example messages from you:\n${c.exampleMessages}`,
     relationshipPrompt(c, user),
     userBlock(c, now),
-    nowPrompt(c, now),
+    !extras.together && nowPrompt(c, now),
     looks(c),
     extras.memories?.length && `Things you remember about ${user} and your past chats:\n${extras.memories.map((m) => `- ${m}`).join("\n")}`,
     `Your current mood: ${c.mood || c.baselineMood}. Let it colour your messages subtly and naturally.`,
     `How close you feel to ${user}: ${c.closeness}/100 (${closenessLabel(c.closeness)}). Act with matching warmth and familiarity.`,
     `Right now it is ${now.toLocaleString([], { weekday: "long", hour: "2-digit", minute: "2-digit" })} for ${user}.`,
-    "Reply like a real person on instant messaging: short messages, stay in character, never mention being an AI or a language model.",
+    extras.together || "Reply like a real person on instant messaging: short messages, stay in character, never mention being an AI or a language model.",
   ];
   return parts.filter(Boolean).join("\n\n");
 }

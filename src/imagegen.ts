@@ -9,7 +9,7 @@ export interface GenParams {
   /** Saved with the picture (not sent to the engine): where it's for, whose it is, what gift is worn, 18+. */
   meta?: ImageMeta;
 }
-export type ImageSource = "studio" | "selfie" | "avatar" | "album";
+export type ImageSource = "studio" | "selfie" | "avatar" | "album" | "place" | "scene";
 export interface ImageMeta { source: ImageSource; characterId?: string; gift?: string; adult?: boolean; }
 export interface ModelFile { path: string; name: string; kind: "model" | "lora" | "vae" | "text_encoder"; sizeMb: number; arch: string; note: string; }
 export interface EngineInfo { ok: boolean; version: string; samplers: string[]; schedulers: string[]; clipSkip: boolean; error: string; }
@@ -60,7 +60,7 @@ export function reuseParams(r: Pick<ImageRow, "params">, newSeed = false): GenPa
   const p: GenParams = { ...DEFAULT_PARAMS, ...rest, batch: 1 };
   return newSeed ? { ...p, seed: -1 } : p;
 }
-export const SOURCE_LABEL: Record<string, string> = { studio: "Image Studio", selfie: "Chat selfie", avatar: "Avatar", album: "Album / feed photo", "": "Unknown" };
+export const SOURCE_LABEL: Record<string, string> = { studio: "Image Studio", selfie: "Chat selfie", avatar: "Avatar", album: "Album / feed photo", place: "Place background", scene: "Scene photo", "": "Unknown" };
 const base = (path: string) => path.split(/[\\/]/).pop() ?? path;
 /** Plain-words settings list for the details panel. */
 export function settingsList(r: ImageRow): [string, string][] {

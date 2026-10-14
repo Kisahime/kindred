@@ -199,5 +199,5 @@ export function anniversaryLabel(months: number) {
 }
 export const MILESTONE_ICON: Record<string, string> = {
   first_met: "\u{1F91D}", first_selfie: "\u{1F4F7}", relationship: "\u{1F49E}", nickname: "\u{1F3F7}\uFE0F", pet_name: "\u{1F496}",
-  inside_joke: "\u{1F602}", anniversary: "\u{1F389}",
+  inside_joke: "\u{1F602}", anniversary: "\u{1F389}", first_date: "\u{1F49E}", first_hangout: "\u{1F4CD}",
 };

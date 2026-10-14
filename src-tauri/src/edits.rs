@@ -37,12 +37,12 @@ impl Db {
     }
     fn list_messages_where(&self, cond: &str, p: impl rusqlite::Params) -> Result<Vec<Message>, String> {
         let c = self.conn.lock().unwrap();
-        let mut st = c.prepare(&format!("SELECT id,character_id,role,content,created_at,is_error,is_unread,is_proactive,reaction,alternates,alt_index,image_path FROM messages WHERE {cond} ORDER BY id")).map_err(e)?;
+        let mut st = c.prepare(&format!("SELECT id,character_id,role,content,created_at,is_error,is_unread,is_proactive,reaction,alternates,alt_index,image_path,scene_id FROM messages WHERE {cond} ORDER BY id")).map_err(e)?;
         let rows = st.query_map(p, |r| Ok(Message {
             id: r.get(0)?, character_id: r.get(1)?, role: r.get(2)?, content: r.get(3)?, created_at: r.get(4)?,
             is_error: r.get::<_, i64>(5)? != 0, is_unread: r.get::<_, i64>(6)? != 0, is_proactive: r.get::<_, i64>(7)? != 0,
             reaction: r.get(8)?, alternates: serde_json::from_str(&r.get::<_, String>(9)?).unwrap_or_default(), alt_index: r.get(10)?,
-            image_path: r.get(11)?,
+            image_path: r.get(11)?, scene_id: r.get(12)?,
         })).map_err(e)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(e)
     }

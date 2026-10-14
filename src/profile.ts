@@ -10,13 +10,15 @@ export const FIELDS = [
   ["job", "Job / studies", "nurse, studying part-time"], ["hobbies", "Hobbies", "gaming, baking"], ["likes", "Likes", "rainy days, cats"],
   ["dislikes", "Dislikes", "loud chewing"], ["food", "Favourite food", "pasta"], ["music", "Favourite music", "lo-fi, Taylor Swift"],
   ["films", "Favourite films / shows", "Studio Ghibli"], ["about", "About me", "A few sentences about you"], ["traits", "Personality traits", "shy at first, silly with friends"],
-  ["boundaries", "Boundaries / topics to avoid", "my ex, politics"], ["picture", "Profile picture", ""],
+  ["boundaries", "Boundaries / topics to avoid", "my ex, politics"],
+  ["photoLook", "My appearance for photos (optional; only used for photos of you both, never sent to chats)", "e.g. adult woman, shoulder-length auburn hair, green eyes, freckles, casual style"],
+  ["picture", "Profile picture", ""],
 ] as const;
 export type FieldId = typeof FIELDS[number][0];
 export interface UserProfile { v: 1; fields: Record<FieldId, PField>; perChar: Record<string, string>; }
 
 export function blankProfile(name = ""): UserProfile {
-  const fields = Object.fromEntries(FIELDS.map(([id]) => [id, { value: "", share: id !== "picture" }])) as Record<FieldId, PField>;
+  const fields = Object.fromEntries(FIELDS.map(([id]) => [id, { value: "", share: id !== "picture" && id !== "photoLook" }])) as Record<FieldId, PField>;
   fields.displayName.value = name;
   return { v: 1, fields, perChar: {} };
 }

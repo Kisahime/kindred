@@ -103,6 +103,9 @@ pub struct Message {
     /// Picture attached to this message (selfies), absolute path in data/images.
     #[serde(default)]
     pub image_path: Option<String>,
+    /// Together-mode scene this message belongs to ("" = normal messenger chat).
+    #[serde(default)]
+    pub scene_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -219,6 +222,7 @@ const MIGRATIONS: &[(&str, &str, &str)] = &[
     ("images", "gift", "TEXT NOT NULL DEFAULT ''"),
     ("images", "adult", "INTEGER NOT NULL DEFAULT 0"),
     ("images", "recorded", "INTEGER NOT NULL DEFAULT 1"),
+    ("messages", "scene_id", "TEXT NOT NULL DEFAULT ''"),
 ];
 
 /// All tables + column migrations (start-up and after a restore).
@@ -244,7 +248,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 const COLS: &str = "id,name,avatar,avatar_path,color,status,personal_message,personality,backstory,speaking_style,greeting,example_messages,model,created_at,updated_at,proactive_enabled,proactive_frequency,baseline_mood,mood,closeness,mood_updated_at,summarized_upto,appearance,life";
-const MSG_COLS: &str = "id,character_id,role,content,created_at,is_error,is_unread,is_proactive,reaction,alternates,alt_index,image_path";
+const MSG_COLS: &str = "id,character_id,role,content,created_at,is_error,is_unread,is_proactive,reaction,alternates,alt_index,image_path,scene_id";
 
 fn row_char(r: &Row) -> rusqlite::Result<Character> {
     Ok(Character {
@@ -258,12 +262,20 @@ fn row_char(r: &Row) -> rusqlite::Result<Character> {
         life: serde_json::from_str(&r.get::<_, String>(23)?).unwrap_or_else(|_| empty_obj()),
     })
 }
+/// Id of the character's active Together scene (kv "scene:<id>" with status "active"), or "".
+fn active_scene(c: &Connection, character_id: &str) -> String {
+    c.query_row("SELECT value FROM kv WHERE key=?1", [format!("scene:{character_id}")], |r| r.get::<_, String>(0)).ok()
+        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
+        .filter(|v| v["status"] == "active")
+        .and_then(|v| v["id"].as_str().map(String::from))
+        .unwrap_or_default()
+}
 fn row_msg(r: &Row) -> rusqlite::Result<Message> {
     Ok(Message {
         id: r.get(0)?, character_id: r.get(1)?, role: r.get(2)?, content: r.get(3)?, created_at: r.get(4)?,
         is_error: r.get::<_, i64>(5)? != 0, is_unread: r.get::<_, i64>(6)? != 0, is_proactive: r.get::<_, i64>(7)? != 0,
         reaction: r.get(8)?, alternates: serde_json::from_str(&r.get::<_, String>(9)?).unwrap_or_default(), alt_index: r.get(10)?,
-        image_path: r.get(11)?,
+        image_path: r.get(11)?, scene_id: r.get(12)?,
     })
 }
 
@@ -482,10 +494,11 @@ impl Db {
         if !matches!(role, "user" | "assistant") { return Err(format!("bad role {role}")); }
         let t = now();
         let c = self.conn.lock().unwrap();
-        c.execute("INSERT INTO messages(character_id,role,content,created_at,is_error,is_unread,is_proactive) VALUES(?1,?2,?3,?4,?5,?6,?6)",
-            params![character_id, role, content, t, is_error as i64, proactive as i64]).map_err(e)?;
+        let scene_id = active_scene(&c, character_id);
+        c.execute("INSERT INTO messages(character_id,role,content,created_at,is_error,is_unread,is_proactive,scene_id) VALUES(?1,?2,?3,?4,?5,?6,?6,?7)",
+            params![character_id, role, content, t, is_error as i64, proactive as i64, scene_id]).map_err(e)?;
         Ok(Message { id: c.last_insert_rowid(), character_id: character_id.into(), role: role.into(), content: content.into(),
-            created_at: t, is_error, is_unread: proactive, is_proactive: proactive, reaction: String::new(), alternates: vec![], alt_index: 0, image_path: None })
+            created_at: t, is_error, is_unread: proactive, is_proactive: proactive, reaction: String::new(), alternates: vec![], alt_index: 0, image_path: None, scene_id })
     }
 
     pub fn mark_read(&self, character_id: &str) -> Result<(), String> {
@@ -763,5 +776,25 @@ mod tests {
         let custom = std::path::Path::new(r"D:\stuff\mychats");
         assert_eq!(layout_root(custom), custom);
         assert_eq!(layout_root(std::path::Path::new("data")), std::path::Path::new("data"));
+    }
+
+    #[test]
+    fn messages_carry_active_scene_id() {
+        let (db, _t) = temp_db();
+        let m = db.add_message("mira", "user", "hi", false).unwrap();
+        assert_eq!(m.scene_id, "");
+        {
+            let c = db.conn.lock().unwrap();
+            c.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)", []).unwrap();
+            c.execute("INSERT OR REPLACE INTO kv(key,value) VALUES('scene:mira', ?1)", [r#"{"id":"s1","status":"active"}"#]).unwrap();
+        }
+        let a = db.add_message("mira", "user", "*waves*", false).unwrap();
+        let b = db.add_proactive_message("mira", "hey").unwrap();
+        assert_eq!((a.scene_id.as_str(), b.scene_id.as_str()), ("s1", "s1"));
+        assert_eq!(db.add_message("rex", "user", "yo", false).unwrap().scene_id, "", "other characters unaffected");
+        db.conn.lock().unwrap().execute("UPDATE kv SET value=?1 WHERE key='scene:mira'", [r#"{"id":"s1","status":"paused"}"#]).unwrap();
+        assert_eq!(db.add_message("mira", "user", "later", false).unwrap().scene_id, "", "paused scene = messenger");
+        let all = db.list_messages("mira").unwrap();
+        assert_eq!(all.iter().filter(|m| m.scene_id == "s1").count(), 2, "stored and read back");
     }
 }

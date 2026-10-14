@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 (2026-10-14)
+
+- **Together mode**: meet a character in person. Pick a place (16 presets or your own), a time of day and who pays; the chat turns into an in-person scene with styled actions (*like this*), a scene card (place, time, season, weather) and a recap when you part.
+- Optional narrator that describes the scene every few turns (or on demand with `>>` / `/narrate`).
+- Meet-up costs in Sparkles (you pay, they pay, split, or free places), and characters can invite you out themselves.
+- Plan for later: arrange a meet-up for a set time; it starts when it is due.
+- Place backgrounds: an optional generated picture of the place behind the scene, softly blurred, with a "Picture strength" slider in Options.
+- Scene photos: ask for a photo together during a scene. They follow the same rules as selfies (adults only, nothing explicit; worn gifts like lingerie only in private places).
+- Gifts in person: hand over an item during a scene, and characters may occasionally give you something.
+- Optional follow-up message after a meet-up (can be switched off).
+- Fixed: gift messages could read as if the gift went the wrong way.
+- Smaller start-up chunk: React is split into its own bundle.
+
 ## 1.0.0 (2026-10-13)
 
 First public release.

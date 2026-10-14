@@ -20,7 +20,7 @@ import { cafe, cafePrompt } from "./cafe";
 import { giftFit } from "./mall";
 import { repairSaved } from "./repair";
 import { adultGiftCheck, adultGiftNote, loadAdult, saveAdult } from "./afterdark";
-import { chatEarn, closenessReward, dailyLogin, econApi, GIFT, giftMessage, giftNote, giftsOf, giftsPrompt, isAdultItem, Item, milestoneRewards, onWallet, refreshGifts, SPARK } from "./economy";
+import { chatEarn, closenessReward, dailyLogin, earn, econApi, GIFT, giftMessage, giftNote, giftsOf, giftsPrompt, isAdultItem, Item, milestoneRewards, onWallet, refreshGifts, SPARK } from "./economy";
 import { CallWindow } from "./CallWindow";
 import { Answer, decideAnswer } from "./callsession";
 import { speakMessage, tone, voiceApi } from "./voice";
@@ -30,12 +30,20 @@ import { Lightbox, PhotoBubble } from "./PhotoBubble";
 import { PromptDialog } from "./ImageDetails";
 import { MeEditor } from "./MeEditor";
 import { SetupChecklist } from "./SetupChecklist";
+import { ActionText, GiftPicker, MarkerLine, MeetDialog, MeetResult, PlanCard, SceneBackdrop, SceneBanner, SceneBgOption, SCENE_BG_STRENGTH_KEY } from "./TogetherUI";
+import { bgGradient, detectScenePhoto, IN_PERSON, inPersonGiftChance, inPersonGiveNote, PlaceBg, placeBgKey, placeBgParams, PLACE_BGS_KEY, photoNote, SCENE_BG_ON_KEY, scenePhotoParams, scenePhotoPrompt, slotNow } from "./scenephoto";
+import { cleanNarration, costShare, detectMeetIntent, fallbackNarration, findPlace, followUpAllowed, freeSuggestion, INVITES_KEY, InviteSpec, InviteStatus, inviteChance, inviteNote, narrateCommand, narratorMessages, Pay, payLine, pickInvite, placeFromText, sceneCard, sceneSetting, shouldNarrate, turnsSinceNarration } from "./places";
+import { activityChoices, formatDue, newPlan, openPlans, PlannedMeetup, planPrompt, planSummary, PLANS_KEY, resolveWhen, tickPlan } from "./together";
+import { Activity, closenessAfter, detectWrap, firstMilestone, newScene, parseSceneMarker, pauseOnStartup, proactivePaused, runRecap, Scene, sceneKey, sceneLine, sceneMarker, sceneTranscript, togetherPrompt } from "./together";
+import { parseJson } from "./mind";
 import { isBirthday, profile as currentProfile, profileApi, UserProfile } from "./profile";
 import { ConnectedOptions, DataBackups } from "./OptionsExtra";
 import { backupApi } from "./databackup";
 import { economyContext, freshDay, giftBackNote, giftBubble, loadConnected, Offer, offerApi, offerBubble, offerNote, occasionsDue, pickOffer, pickReturnGift, resolveNote, shouldGift, connectedCfg, offerTarget, offerMemory } from "./connected";
 import { adultFlag, dayKey, emitWallet } from "./economy";
 import { detectSelfie, withPrompt, giftForSelfie, GiftShot, logSelfie, selfieNote, selfieSetup, selfieShot } from "./selfie";
+import type { ScenePhoto } from "./scenephoto";
+import { allGiftsOf } from "./economy";
 import { generateImage, GenParams, reuseParams } from "./imagegen";
 import { listen } from "@tauri-apps/api/event";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as autostartEnabled } from "@tauri-apps/plugin-autostart";
@@ -46,7 +54,7 @@ import { blankCharacter, buildSystemPrompt, Character, closenessLabel, Group, MO
 
 interface Msg {
   key: string; dbId?: number; from: "me" | "them"; text: string; time: Date; error?: boolean; proactive?: boolean;
-  reaction?: string; alternates?: string[]; altIndex?: number; image?: string | null;
+  reaction?: string; alternates?: string[]; altIndex?: number; image?: string | null; sceneId?: string;
 }
 interface Toast { key: number; c: Character; text: string; }
 interface MsgActions {
@@ -57,7 +65,7 @@ interface MsgActions {
 const fmt = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const fmtDay = (d: Date) => d.toDateString() === new Date().toDateString() ? fmt(d) : `${d.toLocaleDateString()} ${fmt(d)}`;
 const toMsg = (m: StoredMessage): Msg => ({ key: `db${m.id}`, dbId: m.id, from: m.role === "user" ? "me" : "them", text: m.content, time: new Date(m.createdAt),
-  error: m.isError, proactive: m.isProactive, reaction: m.reaction, alternates: m.alternates, altIndex: m.altIndex, image: m.imagePath ?? null });
+  error: m.isError, proactive: m.isProactive, reaction: m.reaction, alternates: m.alternates, altIndex: m.altIndex, image: m.imagePath ?? null, sceneId: m.sceneId ?? "" });
 const TICK_MS = 30_000;
 const IDLE_SUMMARY_MS = 5 * 60_000;
 const log = (what: string) => (e: unknown) => console.warn(`[background] ${what}:`, e);
@@ -99,6 +107,34 @@ export default function App() {
   const [promptOf, setPromptOf] = useState<{ path: string; name: string } | null>(null);
   const [offers, setOffers] = useState<Record<number, Offer>>({});
   const connBusy = useRef(false);
+  // ---- Together mode (per-character scene; kv "scene:<id>") ----
+  const [scenes, setScenes] = useState<Record<string, Scene>>({});
+  const scenesRef = useRef<Record<string, Scene>>({});
+  scenesRef.current = scenes;
+  const [meetOf, setMeetOf] = useState<Character | null>(null);
+  const [wrapUp, setWrapUp] = useState<Record<string, boolean>>({});
+  const [ending, setEnding] = useState<Record<string, boolean>>({});
+  const inScene = (cid: string) => proactivePaused(scenesRef.current[cid]);
+  // ---- planned meetups (kv "meetup_plans") ----
+  const [plans, setPlans] = useState<PlannedMeetup[]>([]);
+  const plansRef = useRef<PlannedMeetup[]>([]);
+  plansRef.current = plans;
+  const [invites, setInvites] = useState<Record<string, InviteRec>>({});
+  const invitesRef = useRef<Record<string, InviteRec>>({});
+  invitesRef.current = invites;
+  // together3: place backgrounds (kv "place_bgs"), Options toggle, in-person gift picker
+  const [bgs, setBgs] = useState<Record<string, PlaceBg>>({});
+  const bgsRef = useRef<Record<string, PlaceBg>>({});
+  const [bgOn, setBgOn] = useState(true);
+  const bgOnRef = useRef(true);
+  bgOnRef.current = bgOn;
+  const bgJobs = useRef<Set<string>>(new Set());
+  const bgFailed = useRef<Set<string>>(new Set());
+  const [giftPickOf, setGiftPickOf] = useState<Character | null>(null);
+  const [bgStrength, setBgStrength] = useState(50);
+  useEffect(() => { econApi.kvGet<number>(SCENE_BG_STRENGTH_KEY).then((v) => { if (typeof v === "number") setBgStrength(v); }).catch(() => {});
+    const f = (e: Event) => setBgStrength(Number((e as CustomEvent<number>).detail) || 0); window.addEventListener("scene-bg-strength", f); return () => window.removeEventListener("scene-bg-strength", f); }, []);
+  useEffect(() => { const f = (e: Event) => setBgOn((e as CustomEvent<boolean>).detail !== false); window.addEventListener("scene-bg", f); return () => window.removeEventListener("scene-bg", f); }, []);
   const [studioLoad, setStudioLoad] = useState<{ p: GenParams; n: number } | null>(null);
   const [call, setCall] = useState<{ c: Character; incoming: boolean; answer: Answer } | null>(null);
   const [ringing, setRinging] = useState<Character | null>(null);
@@ -145,7 +181,22 @@ export default function App() {
       // characters from before relationships existed: fill in template defaults once (only when blank)
       cs = await Promise.all(cs.map((c) => c.life && Object.keys(c.life).length ? c
         : api.saveCharacter({ ...c, life: { ...lifeOf(c), ...starterLife(c.name) } }).catch(() => c)));
-      setChars(cs); if (cs.some((c) => c.status === "online")) setTimeout(() => play("signin"), 400); })
+      setChars(cs); if (cs.some((c) => c.status === "online")) setTimeout(() => play("signin"), 400);
+      // scenes left open when the app closed are paused: resume or end them from the banner
+      const found: Record<string, Scene> = {};
+      for (const c of cs) {
+        const s0 = await econApi.kvGet<Scene>(sceneKey(c.id)).catch(() => null);
+        const s = pauseOnStartup(s0);
+        if (s && s.status !== "ended") { found[c.id] = s; if (s0?.status !== s.status) econApi.kvSet(sceneKey(c.id), s).catch(log("scene pause")); }
+      }
+      setScenes(found);
+      const ps = await econApi.kvGet<PlannedMeetup[]>(PLANS_KEY).catch(() => null);
+      if (Array.isArray(ps)) setPlans(ps);
+      const iv = await econApi.kvGet<Record<string, InviteRec>>(INVITES_KEY).catch(() => null);
+      if (iv && typeof iv === "object") setInvites(iv);
+      const bg = await econApi.kvGet<Record<string, PlaceBg>>(PLACE_BGS_KEY).catch(() => null);
+      if (bg && typeof bg === "object") { bgsRef.current = bg; setBgs(bg); }
+      setBgOn((await econApi.kvGet<boolean>(SCENE_BG_ON_KEY).catch(() => null)) !== false); })
       .catch((e) => setBanner(`Could not load contacts: ${e}`));
     api.listGroups().then(setGroups).catch((e) => setBanner(`Could not load groups: ${e}`));
     api.unreadCounts().then(setUnread).catch(() => {});
@@ -230,6 +281,7 @@ export default function App() {
 
   const runProactive = async (c: Character, force: boolean, nudgeFirst = false, note = "") => {
     if (generating.current.has(c.id)) return;
+    if (inScene(c.id)) { if (force) console.info(`[proactive] ${c.name}: paused during your meet-up`); return; }
     const { me: s, typing: ty } = live.current;
     if (!force) {
       const history = await api.recentMessages(c.id, 12).catch(() => null);
@@ -250,7 +302,13 @@ export default function App() {
         deliverProactive(c, await api.addProactiveMessage(c.id, NUDGE));
         await new Promise((r) => setTimeout(r, 2500));
       }
-      deliverProactive(c, await generateProactive(c, s, [note, economyContext(c, s.userName)].filter(Boolean).join(" ")));
+      // sometimes the opener is a meet-up invite (closer = more often; never with an open plan or a pending invite)
+      if (!force && !note && !inScene(c.id) && !openPlans(plansRef.current, c.id).length
+        && !Object.values(invitesRef.current).some((v) => v.charId === c.id && v.status === "pending") && Math.random() < inviteChance(c)) {
+        await sendInvite(c, pickInvite(c), true);
+        return;
+      }
+      deliverProactive(c, await generateProactive(c, s, [note, economyContext(c, s.userName), planPrompt(openPlans(plansRef.current, c.id), s.userName)].filter(Boolean).join(" ")));
       // sometimes follow up with an unprompted selfie (separate opt-in per character)
       if (appearanceOf(c).selfiesUnprompted && (force || Math.random() < 0.25)) {
         const setup = await selfieSetup(c);
@@ -265,6 +323,8 @@ export default function App() {
     const tick = () => {
       const now = Date.now();
       lifeTick(now);
+      planTick(now).catch(log("plans"));
+      bgTick();
       for (const c of live.current.chars) {
         if (needsDrift(c, now)) api.setMood(c.id, c.baselineMood, c.closeness).then(replaceChar).catch(log("mood drift"));
         if (!c.proactiveEnabled) { delete due.current[c.id]; continue; }
@@ -375,7 +435,7 @@ export default function App() {
       const mine = cfg.offers ? await econApi.inventory("me").catch(() => [] as Item[]) : [];
       const pendingFrom = new Set(Object.values(live.current.offers).filter((o) => o.status === "pending").map((o) => o.characterId));
       for (const c of [...awake].sort(() => Math.random() - 0.5)) {
-        if (st.rolled[c.id] === today) continue;
+        if (st.rolled[c.id] === today || inScene(c.id)) continue;
         st.rolled = { ...st.rolled, [c.id]: today };
         if (shouldGift(st, c, cfg, now)) {
           if (await giveBack(c)) { st = { ...st, gifts: st.gifts + 1, lastGift: { ...st.lastGift, [c.id]: Date.now() } }; break; }
@@ -414,6 +474,7 @@ export default function App() {
   };
   /** A character sends Alex a present: short message + 🎁 bubble with an Accept button. */
   const giveBack = async (c: Character, occasion = ""): Promise<boolean> => {
+    if (inScene(c.id)) return false;
     const stock = await econApi.shopGet(c.id, dayKey()).catch(() => null);
     const g = pickReturnGift(c, stock?.items ?? null, adultFlag());
     if (!g) return false;
@@ -551,15 +612,20 @@ export default function App() {
   /** Streams a reply to `history` into bubble `key` (new bubble, or replacing an existing one's text). */
   const streamReply = async (c: Character, history: Msg[], key: string, existing: boolean, note?: string) => {
     const memories = selectMemories(await api.listMemories(c.id).catch(() => []));
-    const extra = economyContext(c, me.userName, { always: true });
-    const msgs: ChatMessage[] = [{ role: "system", content: buildSystemPrompt(c, me.userName, { memories }) + (extra ? `\n\n${extra}` : "") }, ...toHistory(c, history)];
+    const extra = [economyContext(c, me.userName, { always: true }), planPrompt(openPlans(plansRef.current, c.id), me.userName)].filter(Boolean).join("\n\n");
+    const scene = scenesRef.current[c.id];
+    const together = scene?.status === "active" ? `${togetherPrompt(c, me.userName, scene, adult)}\n${sceneSetting(sceneCard(scene))}` : undefined;
+    const msgs: ChatMessage[] = [{ role: "system", content: buildSystemPrompt(c, me.userName, { memories, together }) + (extra && !together ? `\n\n${extra}` : "") }, ...toHistory(c, history)];
     if (note) msgs.push({ role: "system", content: note });
     let started = false;
-    return streamChat(c.model, msgs, { onToken: (tok) => {
+    const raw = await streamChat(c.model, msgs, { onToken: (tok) => {
       const first = !started; started = true;
-      if (first && !existing) setList(c.id, (l) => [...l, { key, from: "them", text: tok, time: new Date() }]);
+      if (first && !existing) setList(c.id, (l) => [...l, { key, from: "them", text: tok, time: new Date(), sceneId: together ? scene.id : "" }]);
       else setList(c.id, (l) => l.map((m) => m.key === key ? { ...m, text: (first ? "" : m.text) + tok } : m));
     } });
+    const w = detectWrap(raw);
+    if (w.ended && together) setWrapUp((p) => ({ ...p, [c.id]: true }));
+    return w.text || raw;
   };
 
   /** Background work after a fresh reply: mood (+ maybe a reaction on Alex's message) and memory. */
@@ -599,7 +665,7 @@ export default function App() {
   };
 
   /** Gives one of Alex's items to a character: chat message, memory, small closeness boost, in-character reaction. */
-  const giveGift = async (c0: Character, it: Item) => {
+  const giveGift = async (c0: Character, it: Item, inPerson = false) => {
     const adultGift = isAdultItem(it);
     if (adultGift) { const chk = adultGiftCheck(byId(c0.id) ?? c0, adult); if (!chk.ok) throw new Error(chk.reason); }
     const g = await econApi.gift(it.id, c0.id);
@@ -608,33 +674,310 @@ export default function App() {
     await open(c0);
     const c = byId(c0.id) ?? c0;
     const prior = (await api.listMessages(c.id)).filter((m) => !m.isError).map(toMsg);
-    const mine: Msg = { key: `t${tmp++}`, from: "me", text: giftMessage(g), time: new Date() };
+    const mine: Msg = { key: `t${tmp++}`, from: "me", text: giftMessage(g) + (inPerson ? IN_PERSON : ""), time: new Date(), sceneId: inPerson ? scenesRef.current[c.id]?.id ?? "" : "" };
     const saved = await api.addMessage(c.id, "user", mine.text);
     mine.dbId = saved.id;
     append(c.id, mine); play("sent");
-    api.addMemory(c.id, `${me.userName} gave ${c.name} a gift on ${new Date().toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" })}: ${g.emoji} ${g.name}.`, false, "gift").catch(log("gift memory"));
+    api.addMemory(c.id, `${me.userName} gave ${c.name} a gift${inPerson ? " in person" : ""} on ${new Date().toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" })}: ${g.emoji} ${g.name}.`, false, "gift").catch(log("gift memory"));
     api.setMood(c.id, c.mood, Math.min(100, c.closeness + 2)).then((x) => { replaceChar(x); closenessReward(x).catch(() => {}); }).catch(log("gift closeness"));
-    await reply(c, [...prior, mine], `${giftNote(c, g, me.userName)} ${adultGift ? adultGiftNote(c, me.userName) : giftFit(c, g, me.userName).note}`);
+    await reply(c, [...prior, mine], `${giftNote(c, g, me.userName)} ${adultGift ? adultGiftNote(c, me.userName) : giftFit(c, g, me.userName).note}${inPerson ? ` ${inPersonGiveNote(me.userName, c.name)}` : ""}`);
+  };
+
+  // ---- Together mode ---------------------------------------------------------------
+  const saveScene = async (s: Scene) => {
+    await econApi.kvSet(sceneKey(s.charId), s);
+    setScenes((p) => { const n = { ...p }; if (s.status === "ended") delete n[s.charId]; else n[s.charId] = s; return n; });
+    scenesRef.current = { ...scenesRef.current, [s.charId]: s };
+  };
+  /** Narrator line (second person, short), stored as a narration marker in the scene. Falls back to a template without Ollama. */
+  const narrate = async (c: Character, s: Scene, hint: string, opening: boolean): Promise<Msg | null> => {
+    const card = sceneCard(s);
+    const list = (live.current.chats[c.id] ?? []).filter((x) => x.sceneId === s.id && !x.error);
+    let text = "";
+    try { text = cleanNarration(parseJson(await api.ollamaJson(c.model, narratorMessages(card, me.userName, c.name, sceneTranscript(list, me.userName, c.name, 1500), hint, opening), 0.8))); }
+    catch (e) { console.warn("[narrator]", e); }
+    if (!text) text = fallbackNarration(card, c.name, opening);
+    const saved = await api.addMessage(c.id, "user", sceneMarker({ phase: "narrate", id: s.id, place: s.place, activity: s.activity, text }));
+    const m = toMsg(saved); append(c.id, m);
+    return m;
+  };
+  /** Starts a scene; charges Sparkles for paid places. Returns false if it didn't start (e.g. not enough Sparkles). */
+  const startScene = async (c0: Character, place: string, activity: Activity, opts: { placeId?: string; narrator?: boolean; pay?: Pay } = {}): Promise<boolean> => {
+    setMeetOf(null);
+    const c = byId(c0.id) ?? c0;
+    const pl = findPlace(opts.placeId) ?? placeFromText(place);
+    const cost = pl?.cost ?? 0, pay: Pay = opts.pay ?? "me", share = costShare(cost, pay);
+    if (share > 0) {
+      const bal = await econApi.balance().catch(() => 0);
+      if (bal < share) { setBanner(`Not enough Sparkles for the ${pl!.name.toLowerCase()}: it needs ${share} ${SPARK} and you have ${bal}. ${freeSuggestion(activity)}`); return false; }
+    }
+    const s: Scene = { ...newScene(c.id, place, activity), placeId: pl?.id, narrator: opts.narrator !== false, paid: share };
+    try {
+      await saveScene(s);
+      if (share > 0) await earn(-share, "meetup", `${pl!.name} ${activity} with ${c.name}${pay === "split" ? " (split)" : ""}`).catch(log("meetup cost"));
+      setWrapUp((p) => ({ ...p, [c.id]: false }));
+      const prior = live.current.chats[c.id] ?? [];
+      const saved = await api.addMessage(c.id, "user", sceneMarker({ phase: "start", id: s.id, place: s.place, activity }));
+      const m = toMsg(saved); append(c.id, m);
+      const n = s.narrator ? await narrate(c, s, "", true).catch((e) => { console.warn("[narrator]", e); return null; }) : null;
+      const paid = payLine(pay, cost, me.userName, c.name);
+      await reply(c, [...prior, m, ...(n ? [n] : [])], `(You've just met ${me.userName} in person at ${s.place || "the meeting spot"}.${paid ? ` ${paid}` : ""} Greet them face to face: one action in *asterisks* and a line of speech.)`);
+      ensureBg(c, s, false).catch(log("place bg"));
+      return true;
+    } catch (e) { setBanner(`Could not start the meet-up: ${e instanceof Error ? e.message : e}`); return false; }
+  };
+  const resumeScene = async (c: Character) => {
+    const s = scenesRef.current[c.id];
+    if (s) { await saveScene({ ...s, status: "active" }).catch((e) => setBanner(String(e))); ensureBg(c, s, false).catch(log("place bg")); }
+  };
+  /** Ends the scene: recap (Ollama JSON), memory, feed post, first-time milestone, closeness + mood, optional follow-up text later. */
+  const endScene = async (c0: Character) => {
+    const s = scenesRef.current[c0.id];
+    if (!s || ending[c0.id]) return;
+    const c = byId(c0.id) ?? c0;
+    setEnding((p) => ({ ...p, [c.id]: true }));
+    try {
+      const list = (live.current.chats[c.id] ?? []).filter((m) => m.sceneId === s.id && !m.error);
+      const transcript = sceneTranscript(list, me.userName, c.name);
+      const r = await runRecap(c, me.userName, s, transcript, api.ollamaJson, parseJson).catch((e) => { console.warn("[recap]", e); return null; });
+      await saveScene({ ...s, status: "ended" });
+      const saved = await api.addMessage(c.id, "user", sceneMarker({ phase: "end", id: s.id, place: s.place, activity: s.activity, recap: r?.recap }));
+      append(c.id, toMsg(saved));
+      setWrapUp((p) => ({ ...p, [c.id]: false }));
+      if (!r) { setBanner("The meet-up ended, but the recap couldn't be written (is Ollama running?)."); return; }
+      const day = new Date().toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" });
+      api.addMemory(c.id, `${day}: ${r.memory}`, false, "meetup").catch(log("meetup memory"));
+      if (r.post) lifeApi.addFeedPost(c.id, r.post).then(() => { setFeedVersion((v) => v + 1); setFeedUnread((n) => n + 1); }).catch(log("meetup feed"));
+      const first = firstMilestone(s.activity, c.name);
+      lifeApi.addMilestone(c.id, first.kind, first.title, s.place, null, true).catch(() => {});
+      api.setMood(c.id, r.mood ?? c.mood, closenessAfter(c.closeness, r.rating)).then((x) => { replaceChar(x); closenessReward(x).catch(() => {}); }).catch(log("meetup mood"));
+      if (r.followUp) setTimeout(async () => {
+        const c2 = byId(c.id) ?? c;
+        const st = live.current.me;
+        // only if they may message first (the toggle), not in quiet hours, not while Busy / Appear offline
+        if (!followUpAllowed(c2, inQuietHours(new Date(), st.quietStart, st.quietEnd), inScene(c.id)) || generating.current.has(c.id) || st.status === "busy" || st.status === "offline") return;
+        const last = (live.current.chats[c.id] ?? []).slice(-1)[0];
+        if (last && last.from === "me" && Date.now() - last.time.getTime() < 3 * 60_000) return; // they're already chatting
+        try { deliverProactive(c2, await api.addProactiveMessage(c.id, r.followUp)); } catch (e) { console.warn("[follow-up]", e); }
+      }, 3 * 60_000 + Math.random() * 4 * 60_000);
+    } catch (e) { setBanner(`Could not end the meet-up: ${e instanceof Error ? e.message : e}`); }
+    finally { setEnding((p) => ({ ...p, [c.id]: false })); }
+  };
+
+  // ---- planned meetups ----------------------------------------------------------------
+  const savePlans = async (next: PlannedMeetup[]) => {
+    // keep open plans plus the last 30 finished ones (history), newest first
+    const open = next.filter((p) => p.status === "planned" || p.status === "ready");
+    const done = next.filter((p) => p.status !== "planned" && p.status !== "ready").sort((x, y) => y.createdAt - x.createdAt).slice(0, 30);
+    const keep = [...open, ...done];
+    plansRef.current = keep; setPlans(keep);
+    await econApi.kvSet(PLANS_KEY, keep);
+  };
+  const planTick = async (now: number) => {
+    const s = live.current.me;
+    const quiet = inQuietHours(new Date(now), s.quietStart, s.quietEnd);
+    let changed = false;
+    const next = plansRef.current.map((p) => {
+      const c = live.current.chars.find((x) => x.id === p.charId);
+      if (!c || (p.status !== "planned")) return p;
+      const r = tickPlan(p, c, s.status, quiet, now);
+      if (r.plan !== p) changed = true;
+      if (r.notify) {
+        play("proactive");
+        const key = tmp++;
+        setToasts((ts) => [...ts.filter((t) => t.c.id !== c.id), { key, c, text: `\u{1F4C5} It's time for your ${p.activity}: ${p.place || "meet-up"}. Start it from the chat.` }].slice(-3));
+        setTimeout(() => setToasts((ts) => ts.filter((t) => t.key !== key)), 12000);
+        if (!document.hasFocus()) desktopNotify(`Time to meet ${c.name}`, planSummary(p, c.name));
+      }
+      return r.plan;
+    });
+    if (changed) await savePlans(next);
+  };
+  const createPlan = async (c: Character, r: Extract<MeetResult, { mode: "plan" }>) => {
+    const due = resolveWhen(r.when, c, new Date(), r.at).getTime();
+    const p = newPlan(c.id, r.place, r.activity, r.when, due, Date.now(), { placeId: r.placeId, narrator: r.narrator, pay: r.pay });
+    await savePlans([p, ...plansRef.current]);
+    api.addMemory(c.id, `Planned ${r.activity === "date" ? "a date" : "to hang out"} with ${me.userName}: ${p.place} (${planSummary(p, c.name).split(" \u00B7 ").pop()}).`, false, "meetup").catch(log("plan memory"));
+  };
+  const startPlan = async (c: Character, p: PlannedMeetup) => {
+    if (scenesRef.current[c.id]) { setBanner(`You're already in a meet-up with ${c.name}.`); return; }
+    if (!(await startScene(c, p.place, p.activity, { placeId: p.placeId, narrator: p.narrator, pay: p.pay }))) return;
+    await savePlans(plansRef.current.map((x) => x.id === p.id ? { ...x, status: "started" } : x));
+  };
+  const cancelPlan = async (p: PlannedMeetup) => {
+    await savePlans(plansRef.current.map((x) => x.id === p.id ? { ...x, status: "cancelled" } : x));
+  };
+  const onMeetDone = async (c: Character, r: MeetResult) => {
+    setMeetOf(null);
+    try { if (r.mode === "now") await startScene(c, r.place, r.activity, { placeId: r.placeId, narrator: r.narrator, pay: r.pay }); else await createPlan(c, r); }
+    catch (e) { setBanner(`Could not save the plan: ${e instanceof Error ? e.message : e}`); }
+  };
+
+  // ---- character invites (together2) ------------------------------------------------
+  const saveInvites = async (next: Record<string, InviteRec>) => {
+    invitesRef.current = next; setInvites(next);
+    await econApi.kvSet(INVITES_KEY, next);
+  };
+  /** Shows an invite card from the character (proactive: with a short in-character opener first). */
+  const sendInvite = async (c: Character, spec: InviteSpec, proactive: boolean) => {
+    const s = live.current.me;
+    if (proactive) deliverProactive(c, await generateProactive(c, s, inviteNote(spec, s.userName)));
+    const id = `i${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+    const content = sceneMarker({ phase: "invite", id, place: spec.place, activity: spec.activity, placeId: spec.placeId, when: spec.when, dueAt: spec.dueAt });
+    const saved = proactive ? await api.addProactiveMessage(c.id, content) : await api.addMessage(c.id, "assistant", content);
+    await saveInvites({ ...invitesRef.current, [id]: { status: "pending", charId: c.id } });
+    if (proactive) deliverProactive(c, { ...saved, content: `\u{1F4C5} invited you to meet up: ${spec.place}` }, toMsg(saved));
+    else append(c.id, toMsg(saved));
+  };
+  /** Accept: becomes a planned meet-up for that time and place. Either way the character reacts. */
+  const answerInvite = async (c0: Character, m: Msg, accept: boolean) => {
+    const mk = parseSceneMarker(m.text);
+    if (!mk || mk.phase !== "invite") return;
+    const rec = invitesRef.current[mk.id];
+    if (rec && rec.status !== "pending") return;
+    const c = byId(c0.id) ?? c0;
+    await saveInvites({ ...invitesRef.current, [mk.id]: { status: accept ? "accepted" : "declined", charId: c.id } });
+    const due = mk.dueAt && mk.dueAt > Date.now() ? mk.dueAt : resolveWhen(mk.when ?? "next_free", c).getTime();
+    if (accept) {
+      const p = newPlan(c.id, mk.place, mk.activity, mk.when ?? "at", due, Date.now(), { placeId: mk.placeId, narrator: true, pay: "me" });
+      await savePlans([p, ...plansRef.current]);
+      api.addMemory(c.id, `Planned ${mk.activity === "date" ? "a date" : "to hang out"} with ${me.userName}: ${p.place} (${formatDue(due)}).`, false, "meetup").catch(log("plan memory"));
+    }
+    await reply(c, live.current.chats[c.id] ?? [], accept
+      ? `(${me.userName} accepted your invite: ${mk.place}, ${formatDue(due)}. React happily in one or two short lines.)`
+      : `(${me.userName} declined your invite to ${mk.place}. React gracefully in one short line, no guilt-tripping.)`);
+  };
+
+  // ---- together3: place backgrounds, scene photos, in-person gifts -------------------
+  const hasLook = () => !!currentProfile()?.fields.photoLook?.value.trim();
+  /** Paints the place picture once per place + time of day (lazily), via the normal image pipeline (Ollama is unloaded first). */
+  const ensureBg = async (c: Character, s: Scene, force: boolean) => {
+    if (!bgOnRef.current && !force) return;
+    const slot = slotNow();
+    const key = placeBgKey(s.placeId, s.place, slot);
+    if ((!force && (bgsRef.current[key] || bgFailed.current.has(key))) || bgJobs.current.has(key) || live.current.onCall) return;
+    bgJobs.current.add(key);
+    try {
+      const setup = await selfieSetup(c);
+      if ("reason" in setup) { bgFailed.current.add(key); if (force) setBanner(`No place picture: ${setup.reason}. Soft colours are used instead.`); return; }
+      const rows = await generateImage(placeBgParams(setup.params, s.placeId, s.place, slot), () => {});
+      if (!rows[0]) throw new Error("no picture came back");
+      const next = { ...bgsRef.current, [key]: { path: rows[0].path, prompt: rows[0].params.prompt, createdAt: Date.now() } };
+      bgsRef.current = next; setBgs(next);
+      await econApi.kvSet(PLACE_BGS_KEY, next);
+    } catch (e) { console.warn("[place bg]", e); if (force) setBanner(`The place picture didn't work: ${e instanceof Error ? e.message : e}`); else bgFailed.current.add(key); }
+    finally { bgJobs.current.delete(key); }
+  };
+  /** Every tick: active scenes get their time-of-day variant (cached ones are skipped instantly). */
+  const bgTick = () => {
+    if (!bgOnRef.current) return;
+    for (const s of Object.values(scenesRef.current)) {
+      if (s.status !== "active") continue;
+      const c = live.current.chars.find((x) => x.id === s.charId);
+      if (c && !generating.current.has(c.id) && !live.current.typing[c.id]) ensureBg(c, s, false).catch(() => {});
+    }
+  };
+  /** Background for the open chat: this time of day, else any variant of the same place, else a gradient. */
+  const bgFor = (cid: string): { path: string | null; gradient: string; strength: number } | null => {
+    const s = scenes[cid];
+    if (!s || s.status !== "active" || !bgOn) return null;
+    const key = placeBgKey(s.placeId, s.place, slotNow());
+    const pre = key.slice(0, key.lastIndexOf(":") + 1);
+    const hit = bgs[key] ?? Object.entries(bgs).find(([k]) => k.startsWith(pre))?.[1];
+    return { path: hit?.path ?? null, gradient: bgGradient(pre), strength: bgStrength };
+  };
+  /** Plans a scene photo with the selfie gift rules (what she asked for, else the latest wearable gift she referred to). */
+  const planScenePhoto = (c: Character, pairWanted: boolean, text: string, recent = ""): ScenePhoto | null => {
+    const s = scenesRef.current[c.id];
+    if (!s) return null;
+    const look = currentProfile()?.fields.photoLook?.value ?? "";
+    const g = text ? (giftForSelfie(c, [text]).item ? giftForSelfie(c, [text]) : giftForSelfie(c, [text, recent])) : undefined;
+    return scenePhotoPrompt(c, { ...sceneCard(s), placeId: s.placeId }, pairWanted, look, new Date(), g?.item ? g : undefined);
+  };
+  /** A photo during a scene: of the character, or of you both (needs the opt-in look in the Me profile). Same rules as selfies. */
+  const takeScenePhoto = async (c0: Character, pairWanted: boolean, shot: ScenePhoto | null) => {
+    const c = byId(c0.id) ?? c0;
+    if (!shot) return;
+    if (pairWanted && !shot.pair) setBanner(`For photos of you both, add "My appearance for photos" in your profile (click your picture, top left). Taking one of ${c.name} for now.`);
+    const setup = await selfieSetup(c);
+    if ("reason" in setup) { setBanner(`${c.name} can't take photos yet: ${setup.reason}. Pick a working model in Image Studio (\u{1F3A8}).`); return; }
+    setPhoto((p) => ({ ...p, [c.id]: true }));
+    try {
+      const gi = shot.gift ? allGiftsOf(c.id).find((i) => i.name === shot.gift) ?? null : null;
+      logSelfie(c, shot, gi ? { item: gi, allowed: shot.worn } : undefined).catch(log("selfie log"));
+      const rows = await generateImage(scenePhotoParams(setup.params, c, shot), () => {});
+      if (!rows[0]) throw new Error("no picture came back");
+      const saved = await api.addMessage(c.id, "assistant", `${SELFIE} ${shot.caption}`);
+      await api.setMessageImage(saved.id, rows[0].path);
+      append(c.id, toMsg({ ...saved, imagePath: rows[0].path })); play("received");
+    } catch (e) { setBanner(`The photo didn't work: ${e instanceof Error ? e.message : e}`); }
+    finally { setPhoto((p) => ({ ...p, [c.id]: false })); }
+  };
+  const scenePhotoButton = async (c: Character, pair: boolean) => {
+    if (typing[c.id] || photo[c.id]) return;
+    const shot = planScenePhoto(c, pair, "");
+    await reply(c, live.current.chats[c.id] ?? [], photoNote(me.userName, !!shot?.pair, shot ?? undefined));
+    await takeScenePhoto(c, pair, shot);
+  };
+  /** Rarely, the character hands Alex a present in person (Accept card; same gift rules as presents by message). */
+  const giveInPerson = async (c: Character, s: Scene) => {
+    const stock = await econApi.shopGet(c.id, dayKey()).catch(() => null);
+    const g = pickReturnGift(c, stock?.items ?? null, adultFlag());
+    if (!g) return;
+    await saveScene({ ...s, gifted: true });
+    const msg = await api.addMessage(c.id, "assistant", giftBubble(g) + IN_PERSON);
+    const off = await offerApi.create(c.id, "gift", g, null, 0, msg.id);
+    setOffers((p) => ({ ...p, [msg.id]: off }));
+    append(c.id, toMsg(msg));
+    await reply(c, live.current.chats[c.id] ?? [], `(You just handed ${me.userName} a small present in person: ${g.emoji} ${g.name}. Show it with an *action* and one short line; they can accept it.)`);
   };
 
   const send = async (text: string, forceSelfie = false) => {
     if (!active) return;
     const c = active;
     const prior = chats[c.id] ?? [];
-    const mine: Msg = { key: `t${tmp++}`, from: "me", text, time: new Date() };
+    const together = inScene(c.id);
+    // ">>" or "/narrate" during a scene asks the narrator instead of the character
+    const nc = together ? narrateCommand(text) : null;
+    if (nc) {
+      setTyping((p) => ({ ...p, [c.id]: true }));
+      try { await narrate(c, scenesRef.current[c.id], nc.hint, false); } catch (e) { setBanner(`Narrator: ${e instanceof Error ? e.message : e}`); }
+      finally { setTyping((p) => ({ ...p, [c.id]: false })); }
+      return;
+    }
+    const mine: Msg = { key: `t${tmp++}`, from: "me", text, time: new Date(), sceneId: together ? scenesRef.current[c.id].id : "" };
     append(c.id, mine);
     if (text !== NUDGE) { play("sent"); chatEarn(text).catch(log("chat sparkles")); }
     try { const s = await api.addMessage(c.id, "user", text); mine.dbId = s.id; patchMsg(c.id, mine.key, { dbId: s.id }); }
     catch (e) { setBanner(`Could not save message: ${e}`); }
     // Is she asking for a picture? (cheap JSON check with the chat model; any failure = no)
-    const intent = forceSelfie ? { selfie: true, scene: "" } : text === NUDGE ? { selfie: false, scene: "" }
+    const intent = forceSelfie ? { selfie: true, scene: "" } : text === NUDGE || together ? { selfie: false, scene: "" }
       : await detectSelfie(c, me.userName, text).catch((e) => { console.warn("[selfie intent]", e); return { selfie: false, scene: "" }; });
     const setup = intent.selfie ? await selfieSetup(c) : null;
     const ready = setup && "params" in setup ? setup.params : null;
     // Is the picture about something she was given? (name, type, "wearing it", "the one I gave you", latest gift)
     const lastMine = [...prior].reverse().find((m) => m.from === "me" && Date.now() - m.time.getTime() < 10 * 60_000);
     const gift = intent.selfie ? (giftForSelfie(c, [text, intent.scene]).item ? giftForSelfie(c, [text, intent.scene]) : giftForSelfie(c, [text, intent.scene, lastMine?.text ?? ""])) : undefined;
-    await reply(c, [...prior, mine], intent.selfie ? selfieNote(me.userName, !!ready, gift) : undefined);
+    // Is she suggesting a meet-up ("want to go to the cinema tomorrow?")? Then the reply comes with an invite card.
+    // During a scene: "take a photo of us" / "selfie of us here"
+    const snap = together ? detectScenePhoto(text) : null;
+    const snapShot = snap ? planScenePhoto(c, snap.pair, text, [...prior].reverse().find((m) => m.from === "me" && Date.now() - m.time.getTime() < 10 * 60_000)?.text ?? "") : null;
+    const meet = !together && !intent.selfie && text !== NUDGE ? detectMeetIntent(text) : null;
+    const romantic = activityChoices(c).includes("date");
+    const meetSpec: InviteSpec | null = meet ? { place: meet.place, placeId: meet.placeId, when: meet.when,
+      activity: romantic && (/\bdate\b/i.test(text) || c.closeness >= 60) ? "date" : "hangout", dueAt: resolveWhen(meet.when, c, new Date(), meet.at).getTime() } : null;
+    const meetNote = meetSpec ? `(${me.userName} is suggesting meeting up in person: ${meetSpec.place.toLowerCase()} ${formatDue(meetSpec.dueAt)}. Answer it in character; an invite card for it appears right after your reply so ${me.userName} can confirm.)` : undefined;
+    await reply(c, [...prior, mine], intent.selfie ? selfieNote(me.userName, !!ready, gift) : snap ? photoNote(me.userName, !!snapShot?.pair, snapShot ?? undefined) : meetNote);
+    if (meetSpec) await sendInvite(c, meetSpec, false).catch(log("invite"));
+    // narrator: every few of her turns during a scene
+    const sc = scenesRef.current[c.id];
+    if (together && sc) {
+      const l = (live.current.chats[c.id] ?? []).filter((x) => x.sceneId === sc.id);
+      if (shouldNarrate(turnsSinceNarration(l, (t) => parseSceneMarker(t)?.phase === "narrate", (t) => !!parseSceneMarker(t)), sc.narrator)) await narrate(c, sc, "", false).catch(log("narrator"));
+    }
+    if (snap) await takeScenePhoto(c, snap.pair, snapShot).catch(log("scene photo"));
+    const sc2 = scenesRef.current[c.id];
+    if (together && sc2 && !sc2.gifted && !snap && connectedCfg().giftsBack && Math.random() < inPersonGiftChance(c)) await giveInPerson(c, sc2).catch(log("in-person gift"));
     if (ready) await sendSelfie(c, intent.scene, ready, false, gift);
     else if (setup && "reason" in setup) setBanner(`${c.name} can't send pictures yet: ${setup.reason}. Pick a working model in Image Studio (\u{1F3A8}).`);
   };
@@ -842,7 +1185,7 @@ export default function App() {
           <ImageStudio chars={chars} onCharUpdated={replaceChar} onBanner={setBanner} adult={adult} load={studioLoad} />
         ) : feedOpen ? (
           <FeedPane chars={chars} me={me} version={feedVersion} posting={posting} onAskPost={() => postUpdate(true)} onOpenChar={open}
-            onAvatar={photoAsAvatar} onBanner={setBanner} onRead={() => setFeedUnread(0)} />
+            onAvatar={photoAsAvatar} onBanner={setBanner} onRead={() => setFeedUnread(0)} plans={openPlans(plans)} />
         ) : econOpen ? (
           <EconomyPane adult={adult} chars={chars} me={me} tab={econTab} onTab={setEconTab} onBanner={setBanner} onGift={giveGift} />
         ) : activeGroupId && groups.find((g) => g.id === activeGroupId) ? (
@@ -853,6 +1196,12 @@ export default function App() {
             models={models} onModel={setModel} onSend={send} onEdit={() => setEditing(active)} onClear={() => clearChat(active)} onMemories={() => setMemoriesOf(active.id)} onNudge={nudge} emoticons={me.emoticons}
             photo={!!photo[active.id]} focusKey={focusKey} proposal={(() => { const p = lifeOf(active).proposal; return p ? p.detail || p.to : null; })()}
             onAnswer={(yes) => answerProposal(active, yes)} onCall={() => startCall(active, false)} onSpeak={(m) => speak(active, m)} onCamera={() => send("Send me a selfie? \u{1F4F7}", true)} onOpenPhoto={(m) => setLightbox({ c: active, m })} onPhotoInfo={(m) => m.image && setPromptOf({ path: m.image, name: active.name })} offers={offers} onOffer={(m, yes) => answerOffer(active, m, yes)}
+            scene={scenes[active.id] ?? null} wrapUp={!!wrapUp[active.id]} ending={!!ending[active.id]}
+            plans={openPlans(plans, active.id)} onStartPlan={(p) => startPlan(active, p)} onCancelPlan={cancelPlan}
+            invites={invites} onInvite={(m, yes) => answerInvite(active, m, yes).catch((e) => setBanner(String(e)))}
+            bg={bgFor(active.id)} onNewBg={() => { const s = scenesRef.current[active.id]; if (s) { setBanner("Painting a new picture of this place\u2026 it appears when it's ready."); ensureBg(active, s, true).catch(log("place bg")); } }}
+            hasLook={hasLook()} onScenePhoto={(pair) => scenePhotoButton(active, pair).catch(log("scene photo"))} onOpenMe={() => profile && setMeOpen(true)} onGiveInPerson={() => setGiftPickOf(active)}
+            onMeet={() => setMeetOf(active)} onEndScene={() => endScene(active)} onResumeScene={() => resumeScene(active)} onStay={() => setWrapUp((p) => ({ ...p, [active.id]: false }))}
             actions={{ react: (m, e) => react(active, m, e), regen: (m) => m.image ? retakeSelfie(active, m) : regenerate(active, m), swipe: (m, d) => swipe(active, m, d),
               remove: (m) => removeMsg(active, m), edit: (m, t) => editMsg(active, m, t) }} />
         ) : (
@@ -901,6 +1250,8 @@ export default function App() {
         onReuse={(r, fresh) => { setPromptOf(null); setStudioLoad({ p: reuseParams(r, fresh), n: Date.now() }); setStudio(true); }} />}
       {lightbox && lightbox.m.image && <Lightbox path={lightbox.m.image} title={`${lightbox.c.name} selfie`} busy={!!photo[lightbox.c.id]} onClose={() => setLightbox(null)}
         onAvatar={() => photoAsAvatar(lightbox.c, lightbox.m.image!)} onRegen={() => retakeSelfie(lightbox.c, lightbox.m)} />}
+      {giftPickOf && <GiftPicker name={giftPickOf.name} onClose={() => setGiftPickOf(null)} onPick={(it) => { const c = giftPickOf; setGiftPickOf(null); giveGift(c, it, true).catch((e) => setBanner(e instanceof Error ? e.message : String(e))); }} />}
+      {meetOf && <MeetDialog c={byId(meetOf.id) ?? meetOf} getBalance={() => econApi.balance()} onDone={(r) => onMeetDone(byId(meetOf.id) ?? meetOf, r)} onClose={() => setMeetOf(null)} />}
       {setup && <SetupChecklist onClose={() => setSetup(false)} />}
       {options && <OptionsDialog onSetup={() => { setOptions(false); setSetup(true); }} adult={adult} onAdult={async (on) => { const s = await saveAdult(on, on); setAdult(s.enabled); if (!s.enabled && econTab === "afterdark") setEconTab("cafe"); }} me={me} onSave={(s) => { saveMe(s); setOptions(false); }} onClose={() => setOptions(false)} />}
     </div>
@@ -933,6 +1284,7 @@ function OptionsDialog({ me, onSave, onClose, adult, onAdult, onSetup }: { onSet
               <input type="time" value={s.quietEnd} onChange={(e) => setS({ ...s, quietEnd: e.target.value })} /></span>
           </div>
           <small>Set both to the same time to turn quiet hours off. Characters also won't message you while you're Busy or Appear offline.</small>
+          <SceneBgOption />
           <label className="switch-row">
             <span className={`switch${s.emoticons ? " on" : ""}`} role="switch" aria-checked={s.emoticons} tabIndex={0} onClick={() => setS({ ...s, emoticons: !s.emoticons })}><i /></span>
             Turn text smileys like :) (L) (Y) into emoticons
@@ -992,7 +1344,14 @@ function OfferButtons({ o, gift, onAnswer }: { o: Offer; gift?: boolean; onAnswe
 
 function ChatPane(props: { c: Character; msgs: Msg[]; typing: boolean; models: string[]; onModel: (m: string) => void; onSend: (t: string) => void; onEdit: () => void; onClear: () => void; onMemories: () => void; onNudge: () => void; emoticons: boolean; actions: MsgActions;
   focusKey: string | null; proposal: string | null; onAnswer: (yes: boolean) => void; onCall: () => void; onSpeak: (m: Msg) => void;
-  photo: boolean; onCamera: () => void; onOpenPhoto: (m: Msg) => void; onPhotoInfo: (m: Msg) => void; offers: Record<number, Offer>; onOffer: (m: Msg, accept: boolean) => void; }) {
+  photo: boolean; onCamera: () => void; onOpenPhoto: (m: Msg) => void; onPhotoInfo: (m: Msg) => void; offers: Record<number, Offer>; onOffer: (m: Msg, accept: boolean) => void;
+  scene: Scene | null; wrapUp: boolean; ending: boolean; onMeet: () => void; onEndScene: () => void; onResumeScene: () => void; onStay: () => void;
+  plans: PlannedMeetup[]; onStartPlan: (p: PlannedMeetup) => void; onCancelPlan: (p: PlannedMeetup) => void;
+  invites: Record<string, InviteRec>; onInvite: (m: Msg, accept: boolean) => void;
+  bg: { path: string | null; gradient: string; strength: number } | null; onNewBg: () => void; hasLook: boolean; onScenePhoto: (pair: boolean) => void; onOpenMe: () => void; onGiveInPerson: () => void; }) {
+  const { scene, wrapUp, ending, onMeet, onEndScene, onResumeScene, onStay, plans, onStartPlan, onCancelPlan, invites, onInvite, bg, onNewBg, hasLook, onScenePhoto, onOpenMe, onGiveInPerson } = props;
+  const [photoMenu, setPhotoMenu] = useState(false);
+  const together = scene?.status === "active";
   const { c, msgs, typing, models, onModel, onSend, onEdit, onClear, onMemories, onNudge, emoticons, actions, photo, onCamera, onOpenPhoto, onPhotoInfo, offers, onOffer, focusKey, proposal, onAnswer, onCall, onSpeak } = props;
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const last = msgs[msgs.length - 1];
@@ -1019,7 +1378,8 @@ function ChatPane(props: { c: Character; msgs: Msg[]; typing: boolean; models: s
           <div className="c-pm">{c.personalMessage}</div>
           <div className="ch-actions">
             <button className="link" onClick={onEdit}>Edit contact</button>
-            <button className="link" onClick={onCall} disabled={typing}>{"\u{1F4DE}"} Call</button>
+            <button className="link" onClick={onCall} disabled={typing || together}>{"\u{1F4DE}"} Call</button>
+            {!scene && <button className="link" onClick={onMeet} disabled={typing}>{"\u{1F4CD}"} Meet up</button>}
             <button className="link" onClick={onMemories}>Profile &amp; memories</button>
             <button className="link" onClick={onClear} disabled={typing}>Clear chat</button>
           </div>
@@ -1030,12 +1390,18 @@ function ChatPane(props: { c: Character; msgs: Msg[]; typing: boolean; models: s
           </select>
         </label>
       </header>
-      <div className="messages">
-        {msgs.map((m) => m.text === NUDGE ? (
+      {scene && <SceneBanner scene={scene} name={c.name} busy={ending || typing} wrapUp={wrapUp} onEnd={onEndScene} onResume={onResumeScene} onStay={onStay} onNewBg={bg ? onNewBg : undefined} />}
+      <div className="msg-wrap" style={{ position: "relative" }}>
+      {together && bg && <SceneBackdrop path={bg.path} gradient={bg.gradient} strength={bg.strength} />}
+      <div className={`messages${together ? " together" : ""}${together && bg ? " has-bg" : ""}`}>
+        {msgs.map((m) => parseSceneMarker(m.text) ? (
+          <MarkerLine key={m.key} id={`msg-${m.key}`} mk={parseSceneMarker(m.text)!} name={c.name} line={sceneLine(parseSceneMarker(m.text)!, c.name)} time={fmtDay(m.time)}
+            status={invites[parseSceneMarker(m.text)!.id]?.status} busy={typing} onInvite={(yes) => onInvite(m, yes)} />
+        ) : m.text === NUDGE ? (
           <div key={m.key} className="nudge-line msg-hover">
             {m.dbId && <MsgTools mine onDelete={() => actions.remove(m)} busy={typing} />}{"\u{1F44B}"} {m.from === "me" ? "You sent a nudge!" : `${c.name} sent you a nudge!`} <small>{fmtDay(m.time)}</small></div>
         ) : (
-          <div key={m.key} id={`msg-${m.key}`} className={`bubble-row ${m.from === "me" ? "mine" : "theirs"}${m.error ? " error" : ""}${m.key === focusKey ? " focus" : ""}`}>
+          <div key={m.key} id={`msg-${m.key}`} className={`bubble-row ${m.from === "me" ? "mine" : "theirs"}${m.error ? " error" : ""}${m.key === focusKey ? " focus" : ""}${m.sceneId ? " in-scene" : ""}`}>
             <div className="bubble">
               {m.dbId && editingKey !== m.key && <MsgTools mine={m.from === "me"} reaction={m.reaction} busy={typing}
                 onReact={m.from === "them" && !m.error ? (e) => actions.react(m, e) : undefined}
@@ -1054,25 +1420,36 @@ function ChatPane(props: { c: Character; msgs: Msg[]; typing: boolean; models: s
                 : m.image ? <PhotoBubble path={m.image} caption={selfieScene(m.text)} onOpen={() => onOpenPhoto(m)} onInfo={() => onPhotoInfo(m)} />
                 : editingKey === m.key
                 ? <EditBox initial={m.text} onCancel={() => setEditingKey(null)} onSave={(t) => { setEditingKey(null); actions.edit(m, t); }} />
-                : <div className="b-text">{emoticons && !m.error ? convertSmileys(m.text) : m.text}</div>}
+                : <div className="b-text">{m.error ? m.text : <ActionText text={emoticons ? convertSmileys(m.text) : m.text} />}</div>}
               <ReactionChip emoji={m.reaction} by={m.from === "me" ? c.name : "You"} />
             </div>
           </div>
         ))}
+        {!scene && plans.map((p) => <PlanCard key={p.id} plan={p} c={c} busy={typing} onStart={() => onStartPlan(p)} onCancel={() => onCancelPlan(p)} />)}
         {typing && <div className="typing">{c.name} is typing<span className="dots"><i/><i/><i/></span></div>}
         {photo && <div className="typing">{"\u{1F4F7}"} {c.name} is taking a photo<span className="dots"><i/><i/><i/></span></div>}
         {proposal && !typing && <div className="proposal-card">{"\u{1F49E}"} <span>{c.name} would like to become your <b>{proposal}</b>.</span>
           <button className="primary" onClick={() => onAnswer(true)}>Accept</button><button onClick={() => onAnswer(false)}>Not now</button></div>}
         <div ref={endRef} />
       </div>
+      </div>
       <div className="composer">
         <EmojiPicker target={taRef} value={draft} onChange={setDraft} />
-        <textarea ref={taRef} value={draft} placeholder={`Message ${c.name}\u2026`} onChange={(e) => setDraft(e.target.value)}
+        <textarea ref={taRef} value={draft} placeholder={together ? `Say or do something\u2026 (*actions* in asterisks)` : `Message ${c.name}\u2026`} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
         <div className="composer-buttons">
           <button onClick={submit} disabled={typing || !draft.trim()}>Send</button>
-          <button className="camera-btn" onClick={onCamera} disabled={typing || photo} title={`Ask ${c.name} for a selfie`}>{"\u{1F4F7}"}</button>
-          <button className="nudge-btn" onClick={doNudge} disabled={typing || cooldown > 0} title="Send a nudge (shakes the window)">{cooldown > 0 ? `${cooldown}s` : "Nudge!"}</button>
+          {together ? <span className="scene-tools">
+            <button className="camera-btn" onClick={() => setPhotoMenu((x) => !x)} disabled={typing || photo} title="Take a photo here">{"\u{1F4F7}"}</button>
+            <button className="gift-btn" onClick={onGiveInPerson} disabled={typing} title={`Give ${c.name} something in person`}>{"\u{1F381}"}</button>
+            {photoMenu && <div className="photo-menu">
+              <button onClick={() => { setPhotoMenu(false); onScenePhoto(false); }}>{"\u{1F4F7}"} Photo of {c.name}</button>
+              {hasLook ? <button onClick={() => { setPhotoMenu(false); onScenePhoto(true); }}>{"\u{1F46B}"} Photo of us both</button>
+                : <button onClick={() => { setPhotoMenu(false); onOpenMe(); }} title="Add 'My appearance for photos' in your profile first">{"\u{1F46B}"} Us both: add your look first{"\u2026"}</button>}
+            </div>}
+          </span>
+          : <button className="camera-btn" onClick={onCamera} disabled={typing || photo} title={`Ask ${c.name} for a selfie`}>{"\u{1F4F7}"}</button>}
+          <button className="nudge-btn" onClick={doNudge} disabled={typing || cooldown > 0 || together} title="Send a nudge (shakes the window)">{cooldown > 0 ? `${cooldown}s` : "Nudge!"}</button>
         </div>
       </div>
     </>
@@ -1087,3 +1464,5 @@ function CallBubble({ log, name }: { log: CallLog; name: string }) {
     </details>
   );
 }
+/** together2: a character's meet-up invite and Alex's answer (kv "meetup_invites"). */
+type InviteRec = { status: InviteStatus; charId: string };

@@ -5,6 +5,7 @@ import { convertSmileys } from "./emoticons";
 import { streamChat } from "./ollama";
 import { buildCommentReplyPrompt, FeedConfig, FeedFrequency, FeedPost, lifeApi } from "./life";
 import { Character, MOOD_EMOJI, Settings } from "./types";
+import { PlannedMeetup, planSummary } from "./together";
 
 const REACTIONS = ["\u2764\uFE0F", "\u{1F602}", "\u{1F44D}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
 const ago = (t: number) => {
@@ -15,10 +16,11 @@ const ago = (t: number) => {
 interface Props {
   chars: Character[]; me: Settings; version: number; posting: boolean;
   onAskPost: () => void; onOpenChar: (c: Character) => void; onAvatar: (c: Character, path: string) => void; onBanner: (s: string) => void; onRead: () => void;
+  plans?: PlannedMeetup[];
 }
 
 /** Messenger-style "What's new" feed. */
-export function FeedPane({ chars, me, version, posting, onAskPost, onOpenChar, onAvatar, onBanner, onRead }: Props) {
+export function FeedPane({ chars, me, version, posting, onAskPost, onOpenChar, onAvatar, onBanner, onRead, plans = [] }: Props) {
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [cfg, setCfg] = useState<FeedConfig>({ frequency: "sometimes" });
   const [drafts, setDrafts] = useState<Record<number, string>>({});
@@ -64,6 +66,11 @@ export function FeedPane({ chars, me, version, posting, onAskPost, onOpenChar, o
         <button onClick={onAskPost} disabled={posting}>{posting ? "Posting\u2026" : "Ask for an update"}</button>
       </header>
       <div className="messages feed-list">
+        {plans.length > 0 && <section className="upcoming">
+          <div className="upcoming-title">{"\u{1F4C5}"} Upcoming meet-ups</div>
+          {[...plans].sort((x, y) => x.dueAt - y.dueAt).map((p) => { const c = byId(p.charId); return c ? (
+            <div key={p.id} className="upcoming-row" onClick={() => onOpenChar(c)}>{p.status === "ready" ? "\u2705 " : ""}{planSummary(p, c.name)}</div>) : null; })}
+        </section>}
         {posts.length === 0 && <div className="mem-empty">Nothing yet. Updates appear here over time, or press "Ask for an update".</div>}
         {posts.map((p) => {
           const c = byId(p.characterId);

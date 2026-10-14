@@ -22,3 +22,7 @@ export * as connected from "../src/connected";
 export * as databackup from "../src/databackup";
 export * as profile from "../src/profile";
 export * as setupMod from "../src/setup";
+export * as together from "../src/together";
+export { ActionText, MarkerLine } from "../src/TogetherUI";
+export * as places from "../src/places";
+export * as scenephoto from "../src/scenephoto";

@@ -328,3 +328,69 @@ button.ptt { background: #ffe9a8; }
 .me-bday input[type=number] { width: 130px; }
 .me-callme { display: flex; gap: 8px; align-items: center; margin: 2px 0; }
 .me-callme input { flex: 1; }
+
+/* ---- Together mode (in-person scenes) ---- */
+.act { font-style: italic; color: var(--act, #6b4fa0); opacity: .95; }
+.act::before, .act::after { content: "\2009"; }
+.scene-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 14px; background: var(--scene-bg); border-bottom: 1px solid var(--scene-border); color: var(--text); font-size: 13px; }
+.scene-banner .scene-where { flex: 1; }
+.scene-banner.paused { opacity: .85; font-style: italic; }
+.scene-banner button { border: 1px solid var(--border-strong); background: var(--button); color: var(--button-text); border-radius: 5px; padding: 3px 10px; cursor: pointer; }
+.scene-banner .scene-wrap { font-size: 12px; color: var(--muted); }
+.messages.together { background: var(--scene-bg); }
+.bubble-row.in-scene .bubble { border-style: dashed; border-radius: 14px; }
+.bubble-row.in-scene .b-text { line-height: 1.5; }
+.scene-line { align-self: center; text-align: center; max-width: 85%; margin: 6px auto; padding: 5px 12px; border-radius: 12px; font-size: 12px;
+  color: var(--muted); background: var(--scene-bg); border: 1px solid var(--scene-border); white-space: pre-wrap; }
+.scene-line small { opacity: .7; margin-left: 4px; }
+.meet-kinds { display: flex; gap: 14px; margin: 8px 0; }
+.meet-reason { font-size: 13px; }
+
+/* planlater */
+
+/* ---- Planned meetups ---- */
+.plan-card { align-self: center; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; max-width: 90%; margin: 8px auto;
+  padding: 8px 12px; border-radius: 12px; background: var(--scene-bg); border: 1px dashed var(--scene-border); color: var(--text); font-size: 13px; }
+.plan-card.ready { border-style: solid; box-shadow: 0 0 0 2px var(--accent); }
+.plan-card .plan-actions { display: flex; gap: 6px; }
+.plan-card button { border: 1px solid var(--border-strong); background: var(--button); color: var(--button-text); border-radius: 5px; padding: 3px 10px; cursor: pointer; }
+.plan-card button.primary { background: var(--primary); color: #fff; }
+.plan-card button:disabled { opacity: .55; cursor: default; }
+.upcoming { margin: 6px 0 12px; padding: 8px 12px; border-radius: 10px; background: var(--scene-bg); border: 1px solid var(--scene-border); }
+.upcoming-title { font-weight: 600; margin-bottom: 4px; }
+.upcoming-row { font-size: 13px; padding: 2px 0; cursor: pointer; } .upcoming-row:hover { text-decoration: underline; }
+
+
+/* together2: place picker, scene card, narrator, invites */
+.place-label { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.place-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px; margin: 4px 0 6px; max-height: 210px; overflow-y: auto; }
+.place-chip { display: flex; align-items: center; gap: 5px; text-align: left; border: 1px solid var(--border-strong); background: var(--button); color: var(--button-text); border-radius: 8px; padding: 5px 8px; cursor: pointer; font-size: 12px; }
+.place-chip small { margin-left: auto; opacity: .7; }
+.place-chip .pe { font-size: 15px; }
+.place-chip.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.place-amb { font-style: italic; margin: 2px 0 6px; }
+.meet-warn { color: #c0392b; font-size: 12px; margin: 4px 0; }
+.narr-toggle { font-size: 12px; margin-top: 6px; }
+.narr-toggle code { font-size: 11px; }
+.scene-card { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.scene-card i { display: block; opacity: .9; }
+.scene-line.narrate { font-style: italic; background: transparent; border: none; border-left: 3px solid var(--scene-border); border-radius: 0; text-align: left; color: var(--muted); font-size: 12.5px; padding: 4px 12px; }
+.scene-line.narrate .narr-tag { font-style: normal; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; opacity: .75; margin-right: 4px; }
+.invite-card.accepted, .invite-card.declined { opacity: .75; }
+
+/* together3: place backdrop, scene tools, gift picker */
+.msg-wrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; isolation: isolate; }
+.msg-wrap > .messages { position: relative; z-index: 1; }
+.messages.together.has-bg { background: transparent; }
+.scene-backdrop { position: absolute; inset: 0; z-index: 0; background-color: var(--scene-bg); background-size: cover; background-position: center; pointer-events: none; overflow: hidden; }
+.scene-backdrop .scene-bg-img { will-change: transform; } /* blur + scale are inline (scenebg) */
+.scene-backdrop .scene-dim { position: absolute; inset: 0; background: var(--surface-3); } /* solid theme colour; opacity from the strength slider */
+.bg-strength { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-size: 12px; }
+.scene-tools { position: relative; display: inline-flex; gap: 4px; }
+.photo-menu { position: absolute; bottom: 110%; right: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); z-index: 5; white-space: nowrap; }
+.photo-menu button { text-align: left; }
+.gift-pick { display: flex; flex-direction: column; gap: 5px; max-height: 340px; overflow-y: auto; }
+.gift-pick-row { display: grid; grid-template-columns: 26px 1fr; text-align: left; gap: 0 6px; border: 1px solid var(--border); background: var(--button); color: var(--button-text); border-radius: 8px; padding: 6px 8px; cursor: pointer; }
+.gift-pick-row .pe { grid-row: span 2; font-size: 18px; }
+.gift-pick-row small { grid-column: 2; color: var(--muted); }
+.gift-pick-row:hover { border-color: var(--accent); }
