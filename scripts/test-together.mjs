@@ -350,6 +350,94 @@ console.log("together unit ok");
   console.log("together3 unit ok");
 }
 
+// ---- (v1.2 group-together) group availability, schedule intersection, prompts, cost split, narrator, scene photos, recap
+{
+  const S = all.scenephoto, P = all.places;
+  const cFree1 = mk("friend", { id: "mira", name: "Mira", closeness: 65, appearance: { age: 24, body: "petite woman", face: "brown eyes", features: "warm smile", style: "", outfitDay: "cardigan", outfitEvening: "jumper", outfitNight: "pyjamas" } });
+  const cFree2 = mk("friend", { id: "rex", name: "Rex", closeness: 45, appearance: { age: 26, body: "tall man", face: "dark hair", features: "glasses", style: "", outfitDay: "hoodie", outfitEvening: "jacket", outfitNight: "tee" } });
+  const cBusy = mk("friend", { id: "elo", name: "Elowen", life: { relationship: "friend", ...sched } });
+  // at 11:00 on Wed, Elowen is busy ("arranging bouquets"), Mira & Rex have no blocking schedule
+  const wed11 = new Date(2026, 9, 14, 11, 0);
+  const avail = T.canGroupMeetNow([cFree1, cFree2, cBusy], wed11);
+  assert.equal(avail.ok, true);
+  assert.deepEqual(avail.free.map((c) => c.id), ["mira", "rex"]);
+  assert.equal(avail.busy.length, 1); assert.equal(avail.busy[0].c.id, "elo"); assert.match(avail.busy[0].reason, /arranging bouquets/);
+  // all asleep -> ok is false
+  const availSleep = T.canGroupMeetNow([cBusy, { ...cBusy, id: "b2", name: "Bea" }], new Date(2026, 9, 14, 3, 0));
+  assert.equal(availSleep.ok, false); assert.equal(availSleep.free.length, 0);
+  // nextGroupFreeAt finds the overlapping window when everyone is free (18:00 today)
+  const overlap = T.nextGroupFreeAt([cFree1, cBusy], wed11);
+  assert.equal(overlap.getHours(), 18); assert.equal(overlap.getDate(), 14);
+  // groupCostShare splits across headcount (Alex + attendees)
+  assert.equal(P.groupCostShare(60, "me", 3), 60);
+  assert.equal(P.groupCostShare(60, "split", 3), 20);
+  assert.equal(P.groupCostShare(35, "split", 4), 9);
+  assert.equal(P.groupCostShare(60, "them", 3), 0);
+  assert.match(P.groupPayLine("split", 60, "Alex"), /Everyone split/);
+  assert.match(P.groupPayLine("them", 60, "Alex", "Mira"), /Mira insisted on treating/);
+  // groupTogetherPrompt & markers
+  const gs = T.newGroupScene("g1", ["mira", "rex"], "  Board game café ", 1000, { placeId: "cafe", narrator: true });
+  assert.equal(gs.groupId, "g1"); assert.equal(gs.place, "Board game café"); assert.deepEqual(gs.attendeeIds, ["mira", "rex"]);
+  const gp = T.groupTogetherPrompt(cFree1, "Tea Club", [cFree1, cFree2], "Alex", gs);
+  assert.match(gp, /TOGETHER IN PERSON with Alex and Rex/); assert.match(gp, /Tea Club/);
+  assert.match(gp, /Reply ONLY as Mira/); assert.match(gp, /wholesome/); assert.match(gp, /\[END_SCENE\]/);
+  const gsm = T.parseSceneMarker(T.sceneMarker({ phase: "start", id: gs.id, place: gs.place, activity: "hangout", attendeeIds: ["mira", "rex"] }));
+  assert.deepEqual(gsm.attendeeIds, ["mira", "rex"]);
+  assert.match(T.groupSceneLine(gsm, "Tea Club", ["Mira", "Rex"]), /You met up with Tea Club \(Mira, Rex\)/);
+  assert.match(T.groupSceneNarration(gsm, "Alex", "Mira", ["Rex"]), /Alex, you \(Mira\) and Rex met up IN PERSON/);
+  // group plans & ticking
+  const gplan = T.newGroupPlan("g1", ["mira", "elo"], "Park", "next_free", wed11.getTime() - 1000, wed11.getTime() - 5000);
+  assert.equal(T.openGroupPlans([gplan], "g1").length, 1);
+  assert.equal(T.openPlans([gplan], "g1").length, 0, "group plans excluded from 1-to-1 charId filter");
+  assert.equal(T.openPlans([gplan]).length, 1, "included in all open plans for Feed");
+  // at 11:00 Elowen is busy so only 1 of 2 is free -> next_free re-aims to 18:00
+  const tickedBusy = T.tickGroupPlan(gplan, [cFree1, cBusy], "online", false, wed11.getTime());
+  assert.equal(tickedBusy.plan.status, "planned"); assert.equal(new Date(tickedBusy.plan.dueAt).getHours(), 18);
+  // at 18:05 both are free -> ready + notify
+  const wed18 = new Date(2026, 9, 14, 18, 5).getTime();
+  const tickedReady = T.tickGroupPlan({ ...gplan, dueAt: wed18 - 1000 }, [cFree1, cBusy], "online", false, wed18);
+  assert.equal(tickedReady.plan.status, "ready"); assert.equal(tickedReady.notify, true);
+  // group narrator
+  const card = P.sceneCard(gs, new Date(2026, 9, 14, 18, 5));
+  const gnm = P.groupNarratorMessages(card, "Alex", ["Mira", "Rex"], "Alex: *waves*", "a waiter brings tea", true);
+  assert.match(gnm[0].content, /Mira, Rex/); assert.match(gnm[0].content, /waiter brings tea/);
+  assert.match(P.groupFallbackNarration(card, ["Mira", "Rex"], true), /Mira and Rex wave you over/);
+  // group scene photos: detect group vs single member, multi-person prompt & safeguards
+  assert.deepEqual(S.detectGroupScenePhoto("let's take a group photo of us all!", [cFree1, cFree2]), { kind: "group", includeUser: true });
+  assert.deepEqual(S.detectGroupScenePhoto("can I take a photo of you guys", [cFree1, cFree2]), { kind: "group", includeUser: false });
+  const detSingle = S.detectGroupScenePhoto("let me take a picture of Mira by the counter", [cFree1, cFree2]);
+  assert.equal(detSingle.kind, "member"); assert.equal(detSingle.target.id, "mira");
+  const gShot = S.groupScenePhotoPrompt([cFree1, cFree2], card, true, "woman with curly hair", new Date(2026, 9, 14, 18, 5));
+  assert.equal(gShot.pair, true);
+  assert.match(gShot.prompt, /group photo of 3 adult friends/);
+  assert.match(gShot.prompt, /person 1: adult 24 year old petite woman/);
+  assert.match(gShot.prompt, /person 2: adult 26 year old tall man/);
+  assert.match(gShot.prompt, /next to an adult: woman with curly hair/);
+  for (const w of ["child", "nude", "lingerie", "nsfw"]) assert.match(gShot.negative, new RegExp(w));
+  assert.match(gShot.caption, /You, Mira and Rex at the Board game café/);
+  // group recap
+  const gtr = T.groupSceneTranscript([
+    { speakerId: null, content: T.sceneMarker({ phase: "start", id: gs.id, place: gs.place, activity: "hangout" }) },
+    { speakerId: null, content: "*deals the cards* ready?" },
+    { speakerId: "mira", content: "*giggles* go easy on me!" },
+    { speakerId: "rex", content: "*grins* no mercy!" },
+  ], [cFree1, cFree2], "Alex");
+  assert.match(gtr, /Alex: \*deals the cards\*/); assert.match(gtr, /Mira: \*giggles\*/); assert.match(gtr, /Rex: \*grins\*/);
+  const gr = await T.runGroupRecap("Tea Club", [cFree1, cFree2], "Alex", gs, gtr, async () => JSON.stringify({
+    recap: "Alex, Mira and Rex played board games and laughed over tea.",
+    poster: "Rex",
+    post: "Board game night champion right here 🎮☕",
+    members: {
+      Mira: { memory: "Played board games with Alex and Rex at the café.", rating: 5, mood: "happy" },
+      Rex: { memory: "Won a round of cards with Alex and Mira.", rating: 4, mood: "excited" },
+    },
+  }), parseJson);
+  assert.equal(gr.posterId, "rex");
+  assert.equal(gr.members.mira.rating, 5); assert.equal(gr.members.mira.mood, "happy");
+  assert.equal(gr.members.rex.rating, 4); assert.equal(gr.members.rex.mood, "excited");
+  console.log("group-together unit ok");
+}
+
 // ---- live
 let up = false; try { up = (await fetch("http://127.0.0.1:11434/api/tags")).ok; } catch {}
 if (!up) { console.log("Ollama not reachable: live skipped"); process.exit(0); }

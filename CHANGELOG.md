@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0 (2026-10-16)
+
+- **Group outings (Together mode for group chats)**: meet up with a group in person at any place preset or custom spot, with member schedule checks, N-way Sparkles cost splitting (or a close friend offering to treat), scene cards and place backgrounds.
+- **Planned group hangouts**: plan a group outing for later (automatically finding the next overlapping free window across everyone's schedules), with ready notifications and upcoming group plans in the "What's new" feed.
+- **Group narrator, photos & gifts in person**: optional group scene narrator (every few turns or via `>>` / `/narrate`), group scene photos (the whole group, the group with you, or a single member), and in-person gifting to any attending member.
+- **Group recaps**: ending a group outing writes a shared recap, saves a memory for each attendee, updates each attendee's mood and closeness, records first-hangout milestones, and posts an attendee's status update to the feed.
+- Styled `*action*` text in all group chats, and automatic pausing of 1-to-1 proactive events while a character is out with a group.
+
 ## 1.1.0 (2026-10-14)
 
 - **Together mode**: meet a character in person. Pick a place (16 presets or your own), a time of day and who pays; the chat turns into an in-person scene with styled actions (*like this*), a scene card (place, time, season, weather) and a recap when you part.

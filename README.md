@@ -19,9 +19,9 @@ A cosy, messenger-style Windows app for chatting with AI characters that run **e
 
 - Classic messenger look: contact list, statuses, nudges, emoticons, sounds, tray icon and notifications.
 - Characters with personalities, moods, memories and their own daily life; they can message you first.
-- **Together mode**: meet characters in person at places (cafe, park, cinema, your own…) with a scene card, optional narrator, recap, meet-up costs and invites from characters.
-- Plans: arrange a meet-up for later; it starts when it is due.
-- Places and photos: optional generated place backgrounds behind a scene and photos together during a scene (same safeguards as selfies).
+- **Together mode**: meet characters in person (1-to-1 or **group outings**) at places (cafe, park, cinema, your own…) with a scene card, optional narrator, recap, meet-up costs and invites from characters.
+- Plans: arrange a 1-to-1 or group meet-up for later (with overlapping schedule checks); it starts when it is due.
+- Places and photos: optional generated place backgrounds behind a scene and photos together during a scene (solo, pair, or multi-character group photos, with the same safeguards as selfies).
 - Group chats, a social feed and phone-style voice calls (optional).
 - Character editor, a template gallery of sample characters and AI-assisted character creation.
 - Image Studio: generate character pictures and selfies with stable-diffusion.cpp (optional). Every image keeps the prompt used.

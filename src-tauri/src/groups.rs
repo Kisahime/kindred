@@ -40,13 +40,16 @@ pub struct GroupMessage {
     pub alternates: Vec<String>,
     #[serde(default)]
     pub alt_index: i64,
+    #[serde(default)]
+    pub scene_id: String,
 }
 
-pub(crate) const GM_COLS: &str = "id,group_id,speaker_id,content,created_at,is_error,reaction,reactor_id,alternates,alt_index,image_path";
+pub(crate) const GM_COLS: &str = "id,group_id,speaker_id,content,created_at,is_error,reaction,reactor_id,alternates,alt_index,image_path,scene_id";
 pub(crate) fn row_gm(r: &Row) -> rusqlite::Result<GroupMessage> {
     Ok(GroupMessage { id: r.get(0)?, group_id: r.get(1)?, speaker_id: r.get(2)?, content: r.get(3)?, created_at: r.get(4)?,
         is_error: r.get::<_, i64>(5)? != 0, reaction: r.get(6)?, reactor_id: r.get(7)?,
-        alternates: serde_json::from_str(&r.get::<_, String>(8)?).unwrap_or_default(), alt_index: r.get(9)?, image_path: r.get(10)? })
+        alternates: serde_json::from_str(&r.get::<_, String>(8)?).unwrap_or_default(), alt_index: r.get(9)?, image_path: r.get(10)?,
+        scene_id: r.get(11)? })
 }
 
 pub fn init_schema(c: &Connection) -> rusqlite::Result<()> {
@@ -140,10 +143,11 @@ impl Db {
     pub fn add_group_message(&self, group_id: &str, speaker_id: Option<&str>, content: &str, is_error: bool) -> Result<GroupMessage, String> {
         let t = now();
         let c = self.conn.lock().unwrap();
-        c.execute("INSERT INTO group_messages(group_id,speaker_id,content,created_at,is_error) VALUES(?1,?2,?3,?4,?5)",
-            params![group_id, speaker_id, content, t, is_error as i64]).map_err(e)?;
+        let scene_id = crate::db::active_scene(&c, group_id);
+        c.execute("INSERT INTO group_messages(group_id,speaker_id,content,created_at,is_error,scene_id) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![group_id, speaker_id, content, t, is_error as i64, scene_id]).map_err(e)?;
         Ok(GroupMessage { id: c.last_insert_rowid(), group_id: group_id.into(), speaker_id: speaker_id.map(String::from),
-            content: content.into(), created_at: t, is_error, reaction: String::new(), reactor_id: None, alternates: vec![], alt_index: 0, image_path: None })
+            content: content.into(), created_at: t, is_error, reaction: String::new(), reactor_id: None, alternates: vec![], alt_index: 0, image_path: None, scene_id })
     }
 
     pub fn clear_group_messages(&self, group_id: &str) -> Result<(), String> {
@@ -202,5 +206,28 @@ mod tests {
         db.delete_group(&g.id).unwrap();
         assert!(db.list_groups().unwrap().is_empty());
         assert!(db.list_group_messages(&g.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn group_messages_carry_active_scene_id() {
+        let t = tempfile::tempdir().unwrap();
+        let db = Db::open(t.path().into()).unwrap();
+        let g = db.save_group(Group { id: String::new(), name: "Tea Club".into(), avatar: String::new(), color: String::new(),
+            member_ids: vec!["mira".into(), "rex".into()], created_at: 0, updated_at: 0 }).unwrap();
+        let m0 = db.add_group_message(&g.id, None, "hi", false).unwrap();
+        assert_eq!(m0.scene_id, "");
+        {
+            let c = db.conn.lock().unwrap();
+            c.execute("INSERT OR REPLACE INTO kv(key,value) VALUES(?1, ?2)",
+                [format!("scene:{}", g.id), r#"{"id":"gs1","status":"active"}"#.to_string()]).unwrap();
+        }
+        let a = db.add_group_message(&g.id, None, "*waves*", false).unwrap();
+        let b = db.add_group_message(&g.id, Some("mira"), "*smiles*", false).unwrap();
+        assert_eq!((a.scene_id.as_str(), b.scene_id.as_str()), ("gs1", "gs1"));
+        db.conn.lock().unwrap().execute("UPDATE kv SET value=?2 WHERE key=?1",
+            [format!("scene:{}", g.id), r#"{"id":"gs1","status":"paused"}"#.to_string()]).unwrap();
+        assert_eq!(db.add_group_message(&g.id, None, "back to text", false).unwrap().scene_id, "", "paused scene = messenger");
+        let all = db.list_group_messages(&g.id).unwrap();
+        assert_eq!(all.iter().filter(|m| m.scene_id == "gs1").count(), 2, "stored and read back");
     }
 }

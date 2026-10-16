@@ -94,6 +94,7 @@ export interface Group {
 export interface GroupMessage {
   id: number; groupId: string; speakerId: string | null; content: string; createdAt: number; isError: boolean;
   reaction: string; reactorId: string | null; alternates: string[]; altIndex: number; imagePath?: string | null;
+  sceneId?: string; // Together-mode scene id ("" = messenger)
 }
 export interface Template { id: number; name: string; data: Partial<Character>; createdAt: number; }
 

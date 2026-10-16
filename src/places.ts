@@ -49,9 +49,19 @@ export const placeEmoji = (placeId?: string, place = "") => (findPlace(placeId) 
 export type Pay = "me" | "split" | "them";
 export const canTreat = (c: Pick<Character, "closeness">) => c.closeness >= 60;
 export function costShare(cost: number, pay: Pay): number { return cost <= 0 || pay === "them" ? 0 : pay === "split" ? Math.ceil(cost / 2) : cost; }
+/** Group outing cost share: split divides across everyone present (Alex + attendees). */
+export function groupCostShare(cost: number, pay: Pay, headcount: number): number {
+  if (cost <= 0 || pay === "them") return 0;
+  return pay === "split" ? Math.ceil(cost / Math.max(2, headcount)) : cost;
+}
 export function payLine(pay: Pay, cost: number, user: string, name: string): string {
   if (cost <= 0) return "";
   return pay === "them" ? `${name} insisted on paying (${cost} Sparkles).` : pay === "split" ? `${user} and ${name} split the cost (${cost} Sparkles).` : `${user} paid (${cost} Sparkles).`;
+}
+export function groupPayLine(pay: Pay, cost: number, user: string, treaterName?: string): string {
+  if (cost <= 0) return "";
+  return pay === "them" ? `${treaterName || "A friend"} insisted on treating everyone (${cost} Sparkles).`
+    : pay === "split" ? `Everyone split the cost (${cost} Sparkles total).` : `${user} treated the group (${cost} Sparkles).`;
 }
 export const freeSuggestion = (activity: Activity) => `Free places: ${freePlaces(activity).map((p) => `${p.emoji} ${p.name}`).join(", ")}.`;
 
@@ -137,6 +147,28 @@ export function fallbackNarration(card: SceneCard, name: string, opening: boolea
   const bits = card.outdoor ? ["A breeze picks up and tugs at your sleeves.", "Somewhere nearby a dog barks happily.", "The light shifts as a cloud drifts past."]
     : ["The music changes to something softer.", "Someone at the next table laughs out loud.", "A server drifts past with a tray of drinks."];
   return bits[Math.floor(rand() * bits.length)];
+}
+
+export function groupNarratorMessages(card: SceneCard, user: string, attendeeNames: string[], transcript: string, hint: string, opening: boolean) {
+  const who = attendeeNames.join(", ");
+  return [
+    { role: "system", content: [
+      `You are a light, unobtrusive narrator for an in-person group hangout between ${user} and ${who} at ${card.place}.`,
+      `Setting: ${card.tod}, ${card.time}; weather ${card.weather}; ${card.mood}`,
+      opening ? `Write the opening: set the scene as ${user} meets up with ${who} there.` : `Describe the surroundings or one small moment happening around the group (a waiter, a breeze, music changing, a dog, laughter nearby, the light shifting).`,
+      hint ? `Include this: ${hint}.` : "",
+      `Write in second person addressing ${user} as "you", present tense, 1-2 short sentences (max 45 words). The others (${who}) are third person.`,
+      `Never write dialogue for anyone, never decide what ${user} says, feels or does. Keep it wholesome; no explicit content.`,
+      'Respond only with JSON: {"narration":""}',
+    ].filter(Boolean).join("\n") },
+    { role: "user", content: transcript || "(the group has just met up)" },
+  ];
+}
+
+export function groupFallbackNarration(card: SceneCard, attendeeNames: string[], opening: boolean, rand = Math.random): string {
+  const who = attendeeNames.length > 1 ? `${attendeeNames.slice(0, -1).join(", ")} and ${attendeeNames[attendeeNames.length - 1]}` : (attendeeNames[0] ?? "your friends");
+  if (opening) return `You arrive at ${card.place}. It's ${card.tod}, ${card.weather.replace(/^\S+\s/, "")}; ${card.mood.charAt(0).toLowerCase()}${card.mood.slice(1)} ${who} wave you over with big smiles.`;
+  return fallbackNarration(card, who, false, rand);
 }
 
 // ---- character-suggested meet-ups (invites) ---------------------------------------

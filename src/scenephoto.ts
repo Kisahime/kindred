@@ -131,3 +131,86 @@ export function inPersonGiftChance(c: Pick<Character, "closeness">): number {
   return c.closeness < 50 ? 0 : Math.min(0.08, 0.02 + ((c.closeness - 50) / 50) * 0.06);
 }
 export const inPersonGiveNote = (user: string, name: string) => `You're together in person: ${user} is physically handing it to you right now. React physically with an *action* (taking it, opening it, hugging) and a line of speech.`;
+
+// ---- v1.2: group scene photos --------------------------------------------------------
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const hasName = (text: string, name: string) => new RegExp(`(^|[^\\p{L}])${escRe(name)}([^\\p{L}]|$)`, "iu").test(text);
+
+export type GroupPhotoIntent =
+  | { kind: "group"; includeUser: boolean }
+  | { kind: "member"; target: Character };
+
+/** Detects "let's take a group photo", "photo of us all", or "take a photo of Lily" during a group scene. */
+export function detectGroupScenePhoto(text: string, attendees: Character[]): GroupPhotoIntent | null {
+  const t = text.toLowerCase();
+  if (t.length > 300) return null;
+  const ask = /\b(take|snap|grab|get|let'?s (take|do|get)|can (we|you)|could (we|you)|how about)\b[^.?!]{0,45}\b(group )?(photo|picture|pic|selfie|snapshot)\b/.test(t)
+    || /\b(group )?(selfie|photo|picture|pic)\b (of|with) (us|everyone|you all|all of us)\b/.test(t);
+  if (!ask) return null;
+  const isGroupWord = /\b(group|everyone|everybody|all of us|us all|you all|y'?all|together|of us|with us)\b/.test(t);
+  const named = attendees.filter((c) => hasName(text, c.name));
+  if (named.length === 1 && !isGroupWord) return { kind: "member", target: named[0] };
+  const includeUser = /\b(with me|all of us|us all|of us|with us|together|everyone)\b/.test(t);
+  return { kind: "group", includeUser };
+}
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * Multi-character candid group photo at `card.place`.
+ * If only 1 character is in `attendees`, delegates to `scenePhotoPrompt`.
+ * Uses landscape dimensions (`pair: true`), adult minimum ages, schedule outfits, and adult-only negative prompts.
+ */
+export function groupScenePhotoPrompt(
+  attendees: Character[], card: SceneCard & { placeId?: string }, includeUser: boolean, userLook: string, now = new Date()
+): ScenePhoto {
+  if (attendees.length <= 1 && attendees[0]) {
+    return scenePhotoPrompt(attendees[0], card, includeUser, userLook, now);
+  }
+  const me = clean(userLook).slice(0, 200);
+  const withMe = includeUser && !!me;
+  const totalCount = attendees.length + (withMe ? 1 : 0);
+  const charDescs = attendees.map((c) => {
+    const a = appearanceOf(c);
+    const age = Math.max(MIN_AGE, a.age);
+    const outfit = buildSelfiePrompt(c, "", now).outfit;
+    const desc = [`adult ${age} year old ${a.body}`, a.face, a.features, outfit ? `wearing ${outfit}` : ""].map(clean).filter(Boolean).join(", ");
+    return desc;
+  });
+  const lead = appearanceOf(attendees[0] ?? ({} as Character));
+  const parts = [
+    `group photo of ${totalCount} adult friends together, standing side by side, casual friendly pose, happy smiles, looking at the camera`,
+    ...charDescs.map((d, i) => `person ${i + 1}: ${d}`),
+    withMe ? `next to an adult: ${me}` : "",
+    `at the ${card.place.toLowerCase()}`,
+    card.tod === "night" || card.tod === "late night" ? "night time, low light" : card.tod === "evening" ? "evening light" : "daylight",
+    card.outdoor ? card.weather.replace(/^\S+\s/, "").replace(/,\s*-?\d+\u00B0C/, "") : "",
+    lead.style, lead.extraTags,
+  ];
+  const prompt = parts.map((x) => clean(x ?? "")).filter(Boolean).join(", ");
+  const extraNegs = attendees.map((c) => appearanceOf(c).negativeTags).filter(Boolean).join(", ");
+  const negative = [
+    ADULT_NEGATIVE, "nude, nudity, explicit, nsfw, exposed, lingerie, underwear, cleavage",
+    "extra fingers, deformed hands, blurry, lowres, watermark, text", extraNegs,
+  ].filter(Boolean).join(", ");
+  const names = attendees.map((c) => c.name);
+  const whoLabel = withMe ? joinNames(["You", ...names]) : joinNames(names);
+  const caption = `\u{1F4F8} ${whoLabel} at the ${card.place}`;
+  return {
+    prompt, negative, caption, pair: true, outfit: "group outfits", place: card.place,
+    adult: false, gift: "", worn: false, declined: "",
+  };
+}
+
+export function groupPhotoNote(user: string, includeUser: boolean, targetName?: string): string {
+  if (targetName) {
+    return `(${user} wants a photo of you (${targetName}) here at the hangout. You're posing for it right now; it appears right after your message. React briefly in person with an *action*.)`;
+  }
+  return includeUser
+    ? `(${user} asked for a group photo of everyone together. You're all gathering in close for the shot right now; the photo appears right after your message. React briefly in person with an *action*.)`
+    : `(${user} is taking a group photo of you all here. You're posing together right now; the photo appears right after your message. React briefly in person with an *action*.)`;
+}
+

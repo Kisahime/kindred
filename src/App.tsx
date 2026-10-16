@@ -33,7 +33,7 @@ import { SetupChecklist } from "./SetupChecklist";
 import { ActionText, GiftPicker, MarkerLine, MeetDialog, MeetResult, PlanCard, SceneBackdrop, SceneBanner, SceneBgOption, SCENE_BG_STRENGTH_KEY } from "./TogetherUI";
 import { bgGradient, detectScenePhoto, IN_PERSON, inPersonGiftChance, inPersonGiveNote, PlaceBg, placeBgKey, placeBgParams, PLACE_BGS_KEY, photoNote, SCENE_BG_ON_KEY, scenePhotoParams, scenePhotoPrompt, slotNow } from "./scenephoto";
 import { cleanNarration, costShare, detectMeetIntent, fallbackNarration, findPlace, followUpAllowed, freeSuggestion, INVITES_KEY, InviteSpec, InviteStatus, inviteChance, inviteNote, narrateCommand, narratorMessages, Pay, payLine, pickInvite, placeFromText, sceneCard, sceneSetting, shouldNarrate, turnsSinceNarration } from "./places";
-import { activityChoices, formatDue, newPlan, openPlans, PlannedMeetup, planPrompt, planSummary, PLANS_KEY, resolveWhen, tickPlan } from "./together";
+import { activityChoices, formatDue, groupPlanSummary, newPlan, openGroupPlans, openPlans, PlannedMeetup, planPrompt, planSummary, PLANS_KEY, resolveWhen, tickGroupPlan, tickPlan } from "./together";
 import { Activity, closenessAfter, detectWrap, firstMilestone, newScene, parseSceneMarker, pauseOnStartup, proactivePaused, runRecap, Scene, sceneKey, sceneLine, sceneMarker, sceneTranscript, togetherPrompt } from "./together";
 import { parseJson } from "./mind";
 import { isBirthday, profile as currentProfile, profileApi, UserProfile } from "./profile";
@@ -114,7 +114,9 @@ export default function App() {
   const [meetOf, setMeetOf] = useState<Character | null>(null);
   const [wrapUp, setWrapUp] = useState<Record<string, boolean>>({});
   const [ending, setEnding] = useState<Record<string, boolean>>({});
-  const inScene = (cid: string) => proactivePaused(scenesRef.current[cid]);
+  const inScene = (cid: string) => proactivePaused(scenesRef.current[cid])
+    || Object.values(scenesRef.current).some((s) => !!s.groupId && s.status === "active"
+      && (s.attendeeIds?.length ? s.attendeeIds.includes(cid) : live.current.groups.find((g) => g.id === s.groupId)?.memberIds.includes(cid)));
   // ---- planned meetups (kv "meetup_plans") ----
   const [plans, setPlans] = useState<PlannedMeetup[]>([]);
   const plansRef = useRef<PlannedMeetup[]>([]);
@@ -149,8 +151,8 @@ export default function App() {
   const lifeBusy = useRef<Set<string>>(new Set());
 
   // Latest state for the scheduler (runs outside React's render cycle).
-  const live = useRef({ me, chars, activeId, chats, typing, feedOpen, posting: false, onCall: false, offers });
-  live.current = { ...live.current, me, chars, activeId, chats, typing, feedOpen, onCall: !!call || !!ringing, offers };
+  const live = useRef({ me, chars, groups, activeId, chats, typing, feedOpen, posting: false, onCall: false, offers });
+  live.current = { ...live.current, me, chars, groups, activeId, chats, typing, feedOpen, onCall: !!call || !!ringing, offers };
   const due = useRef<Record<string, number>>({});
   const generating = useRef<Set<string>>(new Set());
   const summarising = useRef<Set<string>>(new Set());
@@ -189,7 +191,7 @@ export default function App() {
         const s = pauseOnStartup(s0);
         if (s && s.status !== "ended") { found[c.id] = s; if (s0?.status !== s.status) econApi.kvSet(sceneKey(c.id), s).catch(log("scene pause")); }
       }
-      setScenes(found);
+      setScenes((prev) => ({ ...prev, ...found }));
       const ps = await econApi.kvGet<PlannedMeetup[]>(PLANS_KEY).catch(() => null);
       if (Array.isArray(ps)) setPlans(ps);
       const iv = await econApi.kvGet<Record<string, InviteRec>>(INVITES_KEY).catch(() => null);
@@ -198,7 +200,16 @@ export default function App() {
       if (bg && typeof bg === "object") { bgsRef.current = bg; setBgs(bg); }
       setBgOn((await econApi.kvGet<boolean>(SCENE_BG_ON_KEY).catch(() => null)) !== false); })
       .catch((e) => setBanner(`Could not load contacts: ${e}`));
-    api.listGroups().then(setGroups).catch((e) => setBanner(`Could not load groups: ${e}`));
+    api.listGroups().then(async (gs) => {
+      setGroups(gs);
+      const found: Record<string, Scene> = {};
+      for (const g of gs) {
+        const s0 = await econApi.kvGet<Scene>(sceneKey(g.id)).catch(() => null);
+        const s = pauseOnStartup(s0);
+        if (s && s.status !== "ended") { found[g.id] = s; if (s0?.status !== s.status) econApi.kvSet(sceneKey(g.id), s).catch(log("group scene pause")); }
+      }
+      if (Object.keys(found).length) setScenes((prev) => ({ ...prev, ...found }));
+    }).catch((e) => setBanner(`Could not load groups: ${e}`));
     api.unreadCounts().then(setUnread).catch(() => {});
     // daily data backup (at most once a day; keeps the newest 14)
     backupApi.auto().then((b) => { if (b) console.info(`[backup] ${b.name} (${b.files} files)`); }).catch(log("data backup"));
@@ -778,8 +789,25 @@ export default function App() {
     const quiet = inQuietHours(new Date(now), s.quietStart, s.quietEnd);
     let changed = false;
     const next = plansRef.current.map((p) => {
+      if (p.status !== "planned") return p;
+      if (p.groupId) {
+        const g = live.current.groups.find((x) => x.id === p.groupId);
+        const members = g ? g.memberIds.map((id) => live.current.chars.find((x) => x.id === id)).filter(Boolean) as Character[] : [];
+        if (!g || !members.length) return p;
+        const r = tickGroupPlan(p, members, s.status, quiet, now);
+        if (r.plan !== p) changed = true;
+        if (r.notify) {
+          play("proactive");
+          const lead = members[0];
+          const key = tmp++;
+          setToasts((ts) => [...ts, { key, c: lead, text: `\u{1F4C5} It's time for your ${g.name} group hangout: ${p.place || "meet-up"}. Start it from the group chat.` }].slice(-3));
+          setTimeout(() => setToasts((ts) => ts.filter((t) => t.key !== key)), 12000);
+          if (!document.hasFocus()) desktopNotify(`Time to meet ${g.name}`, groupPlanSummary(p, g.name, members.map((m) => m.name)));
+        }
+        return r.plan;
+      }
       const c = live.current.chars.find((x) => x.id === p.charId);
-      if (!c || (p.status !== "planned")) return p;
+      if (!c) return p;
       const r = tickPlan(p, c, s.status, quiet, now);
       if (r.plan !== p) changed = true;
       if (r.notify) {
@@ -873,7 +901,8 @@ export default function App() {
     if (!bgOnRef.current) return;
     for (const s of Object.values(scenesRef.current)) {
       if (s.status !== "active") continue;
-      const c = live.current.chars.find((x) => x.id === s.charId);
+      const cid = s.groupId ? (s.attendeeIds?.[0] ?? live.current.groups.find((g) => g.id === s.groupId)?.memberIds[0] ?? "") : s.charId;
+      const c = live.current.chars.find((x) => x.id === cid);
       if (c && !generating.current.has(c.id) && !live.current.typing[c.id]) ensureBg(c, s, false).catch(() => {});
     }
   };
@@ -936,7 +965,7 @@ export default function App() {
     if (!active) return;
     const c = active;
     const prior = chats[c.id] ?? [];
-    const together = inScene(c.id);
+    const together = proactivePaused(scenesRef.current[c.id]);
     // ">>" or "/narrate" during a scene asks the narrator instead of the character
     const nc = together ? narrateCommand(text) : null;
     if (nc) {
@@ -1184,13 +1213,22 @@ export default function App() {
         {studio ? (
           <ImageStudio chars={chars} onCharUpdated={replaceChar} onBanner={setBanner} adult={adult} load={studioLoad} />
         ) : feedOpen ? (
-          <FeedPane chars={chars} me={me} version={feedVersion} posting={posting} onAskPost={() => postUpdate(true)} onOpenChar={open}
+          <FeedPane chars={chars} groups={groups} me={me} version={feedVersion} posting={posting} onAskPost={() => postUpdate(true)} onOpenChar={open}
+            onOpenGroup={(g) => { setStudio(false); setFeedOpen(false); setEconOpen(false); setActiveGroupId(g.id); setActiveId(null); }}
             onAvatar={photoAsAvatar} onBanner={setBanner} onRead={() => setFeedUnread(0)} plans={openPlans(plans)} />
         ) : econOpen ? (
           <EconomyPane adult={adult} chars={chars} me={me} tab={econTab} onTab={setEconTab} onBanner={setBanner} onGift={giveGift} />
         ) : activeGroupId && groups.find((g) => g.id === activeGroupId) ? (
           <GroupPane key={activeGroupId} g={groups.find((g) => g.id === activeGroupId)!} chars={chars} me={me}
-            onEdit={() => setEditingGroup(groups.find((g) => g.id === activeGroupId)!)} onCharUpdated={replaceChar} onBanner={setBanner} />
+            onEdit={() => setEditingGroup(groups.find((g) => g.id === activeGroupId)!)} onCharUpdated={replaceChar} onBanner={setBanner}
+            scene={scenes[activeGroupId] ?? null}
+            onSceneChange={(s) => { setScenes((prev) => { const n = { ...prev }; if (!s || s.status === "ended") delete n[activeGroupId]; else n[activeGroupId] = s; scenesRef.current = n; return n; }); }}
+            plans={openGroupPlans(plans, activeGroupId)}
+            onSavePlans={async (fn) => { await savePlans(fn(plansRef.current)); }}
+            bg={bgFor(activeGroupId)}
+            onEnsureBg={(c, s, force) => { ensureBg(c, s, force).catch(log("place bg")); }}
+            onFeedPosted={() => { setFeedVersion((v) => v + 1); setFeedUnread((n) => n + 1); }}
+            onOpenMe={() => profile && setMeOpen(true)} />
         ) : active ? (
           <ChatPane key={active.id} c={active} msgs={chats[active.id] ?? []} typing={!!typing[active.id]}
             models={models} onModel={setModel} onSend={send} onEdit={() => setEditing(active)} onClear={() => clearChat(active)} onMemories={() => setMemoriesOf(active.id)} onNudge={nudge} emoticons={me.emoticons}

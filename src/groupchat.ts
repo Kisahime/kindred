@@ -1,7 +1,9 @@
 // Group chat logic: who replies, banter, per-member prompts and reply cleanup.
 import { parseJson } from "./mind";
 import { ChatMessage } from "./ollama";
-import { buildSystemPrompt, Character, Group, GroupMessage, toModelText } from "./types";
+import { SceneCard, sceneSetting } from "./places";
+import { groupSceneNarration, groupTogetherPrompt, parseSceneMarker, Scene } from "./together";
+import { buildSystemPrompt, Character, GIFT, Group, GroupMessage, isEventText, toModelText } from "./types";
 
 const MAX_ADDRESSED = 3;
 const BANTER_CHANCE = 0.35;
@@ -59,15 +61,34 @@ export function banterPick(members: Character[], spoke: Character[], rnd = Math.
 }
 
 /** Chat messages for one member's turn; the user's reactions are noted on her next message. */
-export function buildGroupTurn(c: Character, g: Group, members: Character[], history: GroupMessage[], userName: string, memories: string[], now = new Date(), extra = ""): ChatMessage[] {
+export function buildGroupTurn(
+  c: Character, g: Group, members: Character[], history: GroupMessage[], userName: string, memories: string[],
+  now = new Date(), extra = "", together?: { scene: Scene; card: SceneCard; attendees: Character[] }
+): ChatMessage[] {
   const byId = new Map(members.map((m) => [m.id, m]));
-  const others = members.filter((m) => m.id !== c.id).map((m) => m.name);
-  const system = `${buildSystemPrompt(c, userName, { memories, now })}\n\nYou are in a group chat called "${g.name}" with ${userName}${others.length ? ` and ${others.join(", ")}` : ""}. Messages from others are prefixed with their name. Reply ONLY as ${c.name}, with one short message. You may react to what the others said or talk to them by name. Never write lines for anyone else and do not prefix your message with your name.${extra ? `\n\n${extra}` : ""}`;
+  const activeMembers = together?.attendees?.length ? together.attendees : members;
+  const others = activeMembers.filter((m) => m.id !== c.id).map((m) => m.name);
+  const togetherBlock = together
+    ? `${groupTogetherPrompt(c, g.name, activeMembers, userName, together.scene)}\n${sceneSetting(together.card)}`
+    : undefined;
+  const system = togetherBlock
+    ? `${buildSystemPrompt(c, userName, { memories, now, together: togetherBlock })}${extra ? `\n\n${extra}` : ""}`
+    : `${buildSystemPrompt(c, userName, { memories, now })}\n\nYou are in a group chat called "${g.name}" with ${userName}${others.length ? ` and ${others.join(", ")}` : ""}. Messages from others are prefixed with their name. Reply ONLY as ${c.name}, with one short message. You may react to what the others said or talk to them by name. Never write lines for anyone else and do not prefix your message with your name.${extra ? `\n\n${extra}` : ""}`;
   let pending: string[] = [];
   const turns = history.filter((m) => !m.isError).slice(-24).map((m): ChatMessage => {
+    const mk = parseSceneMarker(m.content);
+    if (mk) return { role: "system", content: groupSceneNarration(mk, userName, c.name, others) };
+    if (isEventText(m.content)) {
+      const targetName = m.speakerId ? (byId.get(m.speakerId)?.name ?? c.name) : c.name;
+      if (m.content.startsWith(GIFT) && m.speakerId && m.speakerId !== c.id) {
+        const what = m.content.slice(GIFT.length).replace(/\(in person\)$/, "").trim();
+        return { role: "system", content: `[Event: ${userName} gave ${targetName} a gift in person: ${what}.]` };
+      }
+      return { role: "system", content: toModelText(m.content, true, userName, targetName) };
+    }
     const name = speakerName(m, byId, userName);
     const text = toModelText(m.content, !m.speakerId, userName, name);
-    if (m.speakerId && m.reaction && !m.reactorId) pending.push(`${userName} reacted ${m.reaction} to ${m.speakerId === c.id ? "your" : `${name}'s`} message`);
+    if (m.speakerId && m.reaction && !m.reactorId && !togetherBlock) pending.push(`${userName} reacted ${m.reaction} to ${m.speakerId === c.id ? "your" : `${name}'s`} message`);
     if (m.speakerId === c.id) return { role: "assistant", content: text };
     let note = "";
     if (!m.speakerId && pending.length) { note = `(${pending.join("; ")}) `; pending = []; }

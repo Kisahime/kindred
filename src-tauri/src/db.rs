@@ -223,6 +223,7 @@ const MIGRATIONS: &[(&str, &str, &str)] = &[
     ("images", "adult", "INTEGER NOT NULL DEFAULT 0"),
     ("images", "recorded", "INTEGER NOT NULL DEFAULT 1"),
     ("messages", "scene_id", "TEXT NOT NULL DEFAULT ''"),
+    ("group_messages", "scene_id", "TEXT NOT NULL DEFAULT ''"),
 ];
 
 /// All tables + column migrations (start-up and after a restore).
@@ -262,9 +263,9 @@ fn row_char(r: &Row) -> rusqlite::Result<Character> {
         life: serde_json::from_str(&r.get::<_, String>(23)?).unwrap_or_else(|_| empty_obj()),
     })
 }
-/// Id of the character's active Together scene (kv "scene:<id>" with status "active"), or "".
-fn active_scene(c: &Connection, character_id: &str) -> String {
-    c.query_row("SELECT value FROM kv WHERE key=?1", [format!("scene:{character_id}")], |r| r.get::<_, String>(0)).ok()
+/// Id of the character's or group's active Together scene (kv "scene:<id>" with status "active"), or "".
+pub(crate) fn active_scene(c: &Connection, id: &str) -> String {
+    c.query_row("SELECT value FROM kv WHERE key=?1", [format!("scene:{id}")], |r| r.get::<_, String>(0)).ok()
         .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
         .filter(|v| v["status"] == "active")
         .and_then(|v| v["id"].as_str().map(String::from))
