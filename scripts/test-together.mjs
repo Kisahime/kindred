@@ -407,6 +407,12 @@ console.log("together unit ok");
   assert.deepEqual(S.detectGroupScenePhoto("can I take a photo of you guys", [cFree1, cFree2]), { kind: "group", includeUser: false });
   const detSingle = S.detectGroupScenePhoto("let me take a picture of Mira by the counter", [cFree1, cFree2]);
   assert.equal(detSingle.kind, "member"); assert.equal(detSingle.target.id, "mira");
+  // v1.2.1: names as common words, 'you together', 'at the' doubling
+  const cRose = { ...cFree2, id: "rose", name: "Rose" };
+  assert.deepEqual(S.detectGroupScenePhoto("Take a photo of the rose garden", [cFree1, cRose]), { kind: "group", includeUser: false });
+  assert.equal(S.detectGroupScenePhoto("Can you take a photo of Rose?", [cFree1, cRose]).target.id, "rose");
+  assert.equal(S.detectGroupScenePhoto("can you take a photo of you together", [cFree1, cRose]).includeUser, false);
+  assert.equal(S.atPlace("The Park"), "at the Park"); assert.equal(S.atPlace("Mira's flat"), "at Mira's flat"); assert.equal(S.atPlace("my place"), "at my place"); assert.equal(S.atPlace("cafe"), "at the cafe");
   const gShot = S.groupScenePhotoPrompt([cFree1, cFree2], card, true, "woman with curly hair", new Date(2026, 9, 14, 18, 5));
   assert.equal(gShot.pair, true);
   assert.match(gShot.prompt, /group photo of 3 adult friends/);

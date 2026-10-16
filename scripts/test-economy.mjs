@@ -293,14 +293,14 @@ E.setAdultFlag(false);
   assert.equal(P.ageOn("1996-10-14", new Date(2026, 9, 13)), 29); assert.equal(P.ageOn("--10-14"), null);
   const p = P.normalizeProfile({ fields: {
     displayName: { value: "Alex", share: true }, nicknames: { value: "Lexi", share: true }, pronouns: { value: "she/her", share: true },
-    birthday: { value: "--10-13", share: true }, town: { value: "Leeds", share: false }, food: { value: "pasta", share: true },
+    birthday: { value: "--10-13", share: true }, town: { value: "Exampletown", share: false }, food: { value: "pasta", share: true },
     boundaries: { value: "my ex", share: true }, about: { value: "secret diary", share: false } }, perChar: { "c-lily": "bunny" } }, { userName: "x" });
   const day = new Date(2026, 9, 13, 12);
   const b = P.aboutUserBlock(p, { id: "c-other", name: "Moss" }, day);
   assert.match(b, /About the user \(Alex, she\/her\)/); assert.match(b, /Nicknames you may use for them: Lexi/);
   assert.match(b, /Pronouns: she\/her/); assert.match(b, /Favourite food: pasta/); assert.match(b, /BOUNDARIES.*my ex/);
   assert.match(b, /TODAY IS ALEX'S BIRTHDAY/); assert.match(b, /Birthday: 13 October\./);
-  assert.doesNotMatch(b, /Leeds|secret diary/, "unshared fields stay private");
+  assert.doesNotMatch(b, /Exampletown|secret diary/, "unshared fields stay private");
   assert.match(P.aboutUserBlock(p, { id: "c-lily", name: "Lily" }, day), /You call them "bunny"/, "per-character nickname");
   assert.doesNotMatch(P.aboutUserBlock(p, { id: "c-lily", name: "Lily" }, new Date(2026, 9, 14)), /BIRTHDAY!/);
   // injected into every prompt that uses buildSystemPrompt (chat, first messages, groups, calls)

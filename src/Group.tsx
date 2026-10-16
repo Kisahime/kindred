@@ -335,7 +335,7 @@ export function GroupPane({ g, chars, me, onEdit, onCharUpdated, onBanner, scene
       push(saved);
       if (s.narrator !== false) await narrateGroup(s, "", true).catch((e) => console.warn("[group narrator]", e));
       const treater = chosen.find((c) => canTreat(c));
-      const paid = groupPayLine(pay, cost, me.userName, treater?.name);
+      const paid = groupPayLine(pay, cost, me.userName, (treater ?? chosen[0])?.name);
       const greeters = chosen.slice(0, 2);
       for (const c of greeters) {
         if (stop.current) break;

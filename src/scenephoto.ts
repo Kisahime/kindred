@@ -99,13 +99,13 @@ export function scenePhotoPrompt(c: Character, card: SceneCard & { placeId?: str
     : [lingerie && worn ? "tasteful boudoir photo, three-quarter body, looking at the camera" : "candid photo, upper body, looking at the camera", worn ? `(wearing ${garment}:1.3)` : "",
        `adult, ${age} year old`, a.body, a.face, a.features, worn ? "" : `wearing ${outfit}`, "smiling"];
   if (lingerie && worn) parts.push("lingerie fully worn and fully covering, tasteful, elegant, non-explicit, soft warm lamp light");
-  parts.push(`at the ${card.place.toLowerCase()}`, card.tod === "night" || card.tod === "late night" ? "night time, low light" : card.tod === "evening" ? "evening light" : "daylight",
+  parts.push(atPlace(card.place.toLowerCase()), card.tod === "night" || card.tod === "late night" ? "night time, low light" : card.tod === "evening" ? "evening light" : "daylight",
     card.outdoor ? card.weather.replace(/^\S+\s/, "").replace(/,\s*-?\d+\u00B0C/, "") : "", a.style, a.extraTags);
   const prompt = parts.map((x) => clean(x ?? "")).filter(Boolean).join(", ");
   const negative = [ADULT_NEGATIVE, "nude, nudity, explicit, nsfw, exposed", lingerie && worn ? "" : "lingerie, underwear, cleavage",
     both ? "three people, crowd" : "extra people, crowd, second person", "extra fingers, deformed hands, blurry, lowres, watermark, text", a.negativeTags].filter(Boolean).join(", ");
   // honest caption: only what is in the picture
-  const caption = `\u{1F4F8} ${both ? `You and ${c.name}` : c.name} at the ${card.place}${worn ? `, wearing the ${item!.name}` : ""}`;
+  const caption = `\u{1F4F8} ${both ? `You and ${c.name}` : c.name} ${atPlace(card.place)}${worn ? `, wearing the ${item!.name}` : ""}`;
   return { prompt, negative, caption, pair: both, outfit, place: card.place, adult: worn && isAdultItem(item!), gift: item?.name ?? "", worn, declined };
 }
 export function scenePhotoParams(base: GenParams, c: Character, p: ScenePhoto): GenParams {
@@ -134,7 +134,17 @@ export const inPersonGiveNote = (user: string, name: string) => `You're together
 
 // ---- v1.2: group scene photos --------------------------------------------------------
 const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const hasName = (text: string, name: string) => new RegExp(`(^|[^\\p{L}])${escRe(name)}([^\\p{L}]|$)`, "iu").test(text);
+/** "at the park", but never "at the the park" and no "the" before possessive / personal places ("at Mira's flat", "at my place"). */
+export function atPlace(place: string): string {
+  const p = place.trim().replace(/^the\s+/i, "");
+  return /^(my|our|your|his|her|their|a|an)\s/i.test(p) || /['\u2019]s(\s|$)/i.test(p) ? `at ${p}` : `at the ${p}`;
+}
+/** Whole-word name used as the subject of a photo request ("photo of Rose", "just Rose", "Rose, smile"). Case-sensitive unless the whole message is lowercase, so a name that is also a common word ("rose", "sky") does not trigger it. */
+const namedInAsk = (text: string, name: string) => {
+  const flags = text === text.toLowerCase() ? "iu" : "u";
+  const n = escRe(name);
+  return new RegExp(`(^|[^\\p{L}])(of|with|just|only)\\s+(just\\s+|only\\s+)?${n}([^\\p{L}]|$)|(^|[^\\p{L}])${n}\\s*[,!]|(^|[^\\p{L}])${n}['\u2019]s\\s+(photo|picture|pic|selfie)`, flags).test(text);
+};
 
 export type GroupPhotoIntent =
   | { kind: "group"; includeUser: boolean }
@@ -148,9 +158,9 @@ export function detectGroupScenePhoto(text: string, attendees: Character[]): Gro
     || /\b(group )?(selfie|photo|picture|pic)\b (of|with) (us|everyone|you all|all of us)\b/.test(t);
   if (!ask) return null;
   const isGroupWord = /\b(group|everyone|everybody|all of us|us all|you all|y'?all|together|of us|with us)\b/.test(t);
-  const named = attendees.filter((c) => hasName(text, c.name));
+  const named = attendees.filter((c) => namedInAsk(text, c.name));
   if (named.length === 1 && !isGroupWord) return { kind: "member", target: named[0] };
-  const includeUser = /\b(with me|all of us|us all|of us|with us|together|everyone)\b/.test(t);
+  const includeUser = /\b(with me|all of us|us all|of us|with us|us together|everyone)\b/.test(t) || /\blet'?s\b/.test(t);
   return { kind: "group", includeUser };
 }
 
@@ -185,7 +195,7 @@ export function groupScenePhotoPrompt(
     `group photo of ${totalCount} adult friends together, standing side by side, casual friendly pose, happy smiles, looking at the camera`,
     ...charDescs.map((d, i) => `person ${i + 1}: ${d}`),
     withMe ? `next to an adult: ${me}` : "",
-    `at the ${card.place.toLowerCase()}`,
+    atPlace(card.place.toLowerCase()),
     card.tod === "night" || card.tod === "late night" ? "night time, low light" : card.tod === "evening" ? "evening light" : "daylight",
     card.outdoor ? card.weather.replace(/^\S+\s/, "").replace(/,\s*-?\d+\u00B0C/, "") : "",
     lead.style, lead.extraTags,
@@ -198,7 +208,7 @@ export function groupScenePhotoPrompt(
   ].filter(Boolean).join(", ");
   const names = attendees.map((c) => c.name);
   const whoLabel = withMe ? joinNames(["You", ...names]) : joinNames(names);
-  const caption = `\u{1F4F8} ${whoLabel} at the ${card.place}`;
+  const caption = `\u{1F4F8} ${whoLabel} ${atPlace(card.place)}`;
   return {
     prompt, negative, caption, pair: true, outfit: "group outfits", place: card.place,
     adult: false, gift: "", worn: false, declined: "",

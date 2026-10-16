@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1 (2026-10-16)
+
+- Scene and group photo captions/prompts no longer say "at the the …", and skip "the" for personal places ("at Mira's flat", "at my place").
+- Group photo requests only pick out a single member when they are clearly named in the request ("photo of Rose", "Rose, smile!"), so names that are also common words no longer trigger by accident; "a photo of you together" no longer adds you to the shot.
+- Group outing recaps always name who treated everyone when "they pay" is chosen.
+- `npm test` builds the test bundle and runs all test scripts (live checks skip when Ollama is not running).
+- Test data no longer uses a real town name.
+
 ## 1.2.0 (2026-10-16)
 
 - **Group outings (Together mode for group chats)**: meet up with a group in person at any place preset or custom spot, with member schedule checks, N-way Sparkles cost splitting (or a close friend offering to treat), scene cards and place backgrounds.
