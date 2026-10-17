@@ -411,6 +411,8 @@ pub fn open_images_folder(db: State<Db>) -> Result<(), String> {
 #[tauri::command]
 pub async fn sd_generate(app: AppHandle, db: State<'_, Db>, params: GenParams, on_progress: Channel<Progress>) -> Result<Vec<ImageRow>, String> {
     let send = |phase: &str, line: &str| { let _ = on_progress.send(Progress { phase: phase.into(), step: 0, total: 0, line: line.into() }); };
+    // protected (under-18) characters are never pictured: hard guard for every job, whatever the front end sent
+    let params = crate::protect::guard(params, &crate::protect::minors_of(&db.list_characters()?))?;
     if params.model.is_empty() || !Path::new(&params.model).exists() { return Err("Pick a model first.".into()); }
     if crate::voice::call_active() { return Err("You're on a call: pictures will work again after you hang up.".into()); }
     crate::voice::shutdown(); // frees Whisper's VRAM; it restarts in a few seconds when next needed

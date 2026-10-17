@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Character, Group, GroupMessage, Memory, Mood, Settings, StoredMessage, Template } from "./types";
+import { ageRuleError } from "./protect";
 
 export const api = {
   listCharacters: () => invoke<Character[]>("list_characters"),
-  saveCharacter: (character: Character) => invoke<Character>("save_character", { character }),
+  /** Every save goes through the protect rule: under 18 only as family. */
+  saveCharacter: (character: Character) => { const bad = ageRuleError(character); return bad ? Promise.reject(new Error(bad)) : invoke<Character>("save_character", { character }); },
   deleteCharacter: (id: string) => invoke<void>("delete_character", { id }),
   listMessages: (characterId: string) => invoke<StoredMessage[]>("list_messages", { characterId }),
   addMessage: (characterId: string, role: "user" | "assistant", content: string, isError = false) =>

@@ -291,8 +291,9 @@ console.log("together unit ok");
   assert.match(pair.caption, /You and Lily/);
   const fam = S.scenePhotoPrompt(mk("grandparent", { closeness: 90 }), card, true, "woman with auburn hair");
   assert.match(fam.prompt, /platonic/); assert.doesNotMatch(fam.prompt, /couple|affectionate/);
+  // v1.3: under 18 = protected: a scene photo shows only the place (was: clamped to 18)
   const old = S.scenePhotoPrompt(mk("friend", { closeness: 50, appearance: { age: 12 } }), card, false, "");
-  assert.doesNotMatch(old.prompt, /\b12 year old/); assert.match(old.prompt, /18 year old|adult/);
+  assert.doesNotMatch(old.prompt, /\b12 year old|adult/); assert.equal(old.noPeople, true); assert.match(old.prompt, /no people/); assert.match(old.negative, /child/);
   const sp = S.scenePhotoParams(base, mk("friend"), pair);
   assert.equal(sp.meta.source, "scene"); assert.equal(sp.meta.adult, false); assert.equal(sp.width, 1216);
   assert.match(S.photoNote("Alex", true), /two of you/); assert.match(S.photoNote("Alex", false), /photo of you/);

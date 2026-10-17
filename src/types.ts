@@ -1,6 +1,7 @@
 import { blankLife, nowPrompt, relationshipPrompt } from "./lifecore";
 import type { Life } from "./lifecore";
 import { parseSceneMarker, SCENE, sceneNarration } from "./together";
+import { ADULT_AGE, isProtectedMinor, minorPromptBlock } from "./protect";
 export type Frequency = "rarely" | "sometimes" | "often";
 export type Status = "online" | "away" | "busy" | "offline";
 export type Mood = "happy" | "cosy" | "playful" | "sad" | "annoyed" | "sleepy" | "excited";
@@ -56,10 +57,12 @@ export function blankAppearance(): Appearance {
   return { age: 25, body: "", face: "", features: "", style: "", outfitDay: "", outfitEvening: "", outfitNight: "",
     placeDay: "", placeEvening: "", placeNight: "", imageModel: "", extraTags: "", negativeTags: "", seed: -1, lora: "", loraStrength: 0.8, selfiesUnprompted: false, voice: "", voiceSpeed: 1, canCall: false };
 }
-/** Fills missing fields and enforces the adult minimum age. */
+/** Fills missing fields and enforces the adult minimum age, except for protected family characters (see protect.ts), who keep their real age. */
 export function appearanceOf(c: Pick<Character, "appearance">): Appearance {
   const a = { ...blankAppearance(), ...((c.appearance ?? {}) as Partial<Appearance>) };
-  a.age = Math.max(MIN_AGE, Math.round(Number(a.age) || 25));
+  const n = Math.round(Number(a.age) || 25);
+  a.age = n >= 1 && n < ADULT_AGE ? n : Math.max(MIN_AGE, n);
+  if (isProtectedMinor({ appearance: a })) a.selfiesUnprompted = false;
   return a;
 }
 export const hasLooks = (a: Appearance) => !!(a.body || a.face || a.features || a.style);
@@ -168,6 +171,7 @@ export interface PromptExtras { memories?: string[]; now?: Date; /** Together mo
 
 /** Builds the system prompt from the editor fields, plus memories and the current mood. */
 function looks(c: Character): string {
+  if (isProtectedMinor(c)) return "";
   const a = appearanceOf(c);
   if (!hasLooks(a)) return "";
   return `Your appearance (you are an adult, ${a.age}): ${[a.body, a.face, a.features].filter(Boolean).join("; ")}. You can send ${"selfie"} photos when asked.`;
@@ -176,6 +180,9 @@ function looks(c: Character): string {
 /** "About the user" block (set by profile.ts; empty until the profile loads). */
 let userBlock: (c: Character, now: Date) => string = () => "";
 export const setUserBlock = (f: (c: Character, now: Date) => string) => { userBlock = f; };
+/** v1.3 Living World block (relations with other characters, season and weather; set by world.ts). */
+let worldBlock: (c: Character, now: Date, together: boolean) => string = () => "";
+export const setWorldBlock = (f: (c: Character, now: Date, together: boolean) => string) => { worldBlock = f; };
 export function buildSystemPrompt(c: Character, userName: string, extras: PromptExtras = {}): string {
   const user = userName || "the user";
   const now = extras.now ?? new Date();
@@ -186,7 +193,9 @@ export function buildSystemPrompt(c: Character, userName: string, extras: Prompt
     c.speakingStyle && `Speaking style: ${c.speakingStyle}`,
     c.exampleMessages && `Example messages from you:\n${c.exampleMessages}`,
     relationshipPrompt(c, user),
+    minorPromptBlock(c, user),
     userBlock(c, now),
+    worldBlock(c, now, !!extras.together),
     !extras.together && nowPrompt(c, now),
     looks(c),
     extras.memories?.length && `Things you remember about ${user} and your past chats:\n${extras.memories.map((m) => `- ${m}`).join("\n")}`,

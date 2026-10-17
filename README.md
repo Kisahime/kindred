@@ -23,12 +23,19 @@ A cosy, messenger-style Windows app for chatting with AI characters that run **e
 - Plans: arrange a 1-to-1 or group meet-up for later (with overlapping schedule checks); it starts when it is due.
 - Places and photos: optional generated place backgrounds behind a scene and photos together during a scene (solo, pair, or multi-character group photos, with the same safeguards as selfies).
 - Group chats, a social feed and phone-style voice calls (optional).
+- **Living World**: opt-in relationships between characters (you choose who knows whom), feed likes, comments and replies between them, letters and diaries, seasonal events, and real weather (optional).
+- Character cards: import Tavern/SillyTavern V1/V2/V3 cards (PNG or JSON) with a preview, and export characters as V2 PNG cards or JSON.
+- **Protected family characters**: characters under 18 are allowed only as family (son, daughter, younger sibling…). They are never pictured (no selfies, avatar generation or people in scene photos with them), never part of romance or 18+ content whatever the 18+ switch says, and can only be friends, rivals, acquaintances or family with other characters.
 - Character editor, a template gallery of sample characters and AI-assisted character creation.
 - Image Studio: generate character pictures and selfies with stable-diffusion.cpp (optional). Every image keeps the prompt used.
 - Sparkles economy: run a café, shop at the mall, give gifts and receive offers.
 - "Me" profile: you decide what characters may know about you.
 - Built-in data backups and restore.
 - 18+ content is off by default; see [CONTENT.md](CONTENT.md).
+
+### Network use
+
+Kindred runs locally (Ollama, stable-diffusion.cpp, Kokoro). The only optional online call is **real weather**: it is off by default and only runs when you switch it on in Options → Living world *and* share your town in your "Me" profile. Kindred then sends that town name to the Open-Meteo geocoder and the resulting coordinates to the Open-Meteo forecast API (no account, no key, nothing else about you), at most every 30 minutes. Characters are told the weather, never the town; offline, they fall back to the season.
 
 ## Requirements
 

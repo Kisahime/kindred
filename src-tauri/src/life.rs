@@ -23,12 +23,16 @@ pub struct Milestone { pub id: i64, pub character_id: String, pub kind: String, 
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct FeedComment { pub id: i64, pub post_id: i64, pub from_user: bool, pub content: String, pub created_at: i64 }
+pub struct FeedComment { pub id: i64, pub post_id: i64, pub from_user: bool, pub content: String, pub created_at: i64,
+    /// v1.3: which character wrote it ("" = the post's owner, or the user when from_user)
+    #[serde(default)] pub author_id: String }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FeedPost { pub id: i64, pub character_id: String, pub content: String, pub image_path: Option<String>, pub reaction: String,
-    pub created_at: i64, pub is_unread: bool, pub comments: Vec<FeedComment> }
+    pub created_at: i64, pub is_unread: bool, pub comments: Vec<FeedComment>,
+    /// v1.3: ids of characters who liked the post
+    #[serde(default)] pub likes: Vec<String> }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -67,13 +71,14 @@ impl Db {
 
     pub fn list_feed(&self, limit: i64) -> Result<Vec<FeedPost>, String> {
         let c = self.conn.lock().unwrap();
-        let mut st = c.prepare("SELECT id,character_id,content,image_path,reaction,created_at,is_unread FROM feed_posts ORDER BY id DESC LIMIT ?1").map_err(e)?;
+        let mut st = c.prepare("SELECT id,character_id,content,image_path,reaction,created_at,is_unread,likes FROM feed_posts ORDER BY id DESC LIMIT ?1").map_err(e)?;
         let mut posts = st.query_map(params![limit], |r| Ok(FeedPost { id: r.get(0)?, character_id: r.get(1)?, content: r.get(2)?, image_path: r.get(3)?,
-            reaction: r.get(4)?, created_at: r.get(5)?, is_unread: r.get::<_, i64>(6)? != 0, comments: vec![] })).map_err(e)?
+            reaction: r.get(4)?, created_at: r.get(5)?, is_unread: r.get::<_, i64>(6)? != 0, comments: vec![],
+            likes: serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default() })).map_err(e)?
             .collect::<rusqlite::Result<Vec<_>>>().map_err(e)?;
-        let mut cs = c.prepare("SELECT id,post_id,from_user,content,created_at FROM feed_comments WHERE post_id=?1 ORDER BY id").map_err(e)?;
+        let mut cs = c.prepare("SELECT id,post_id,from_user,content,created_at,author_id FROM feed_comments WHERE post_id=?1 ORDER BY id").map_err(e)?;
         for p in posts.iter_mut() {
-            p.comments = cs.query_map(params![p.id], |r| Ok(FeedComment { id: r.get(0)?, post_id: r.get(1)?, from_user: r.get::<_, i64>(2)? != 0, content: r.get(3)?, created_at: r.get(4)? }))
+            p.comments = cs.query_map(params![p.id], |r| Ok(FeedComment { id: r.get(0)?, post_id: r.get(1)?, from_user: r.get::<_, i64>(2)? != 0, content: r.get(3)?, created_at: r.get(4)?, author_id: r.get(5)? }))
                 .map_err(e)?.collect::<rusqlite::Result<Vec<_>>>().map_err(e)?;
         }
         Ok(posts)
@@ -82,7 +87,7 @@ impl Db {
         let c = self.conn.lock().unwrap();
         let t = now();
         c.execute("INSERT INTO feed_posts(character_id,content,image_path,created_at) VALUES(?1,?2,?3,?4)", params![character_id, content, image_path, t]).map_err(e)?;
-        Ok(FeedPost { id: c.last_insert_rowid(), character_id: character_id.into(), content: content.into(), image_path: image_path.map(String::from), reaction: String::new(), created_at: t, is_unread: true, comments: vec![] })
+        Ok(FeedPost { id: c.last_insert_rowid(), character_id: character_id.into(), content: content.into(), image_path: image_path.map(String::from), reaction: String::new(), created_at: t, is_unread: true, comments: vec![], likes: vec![] })
     }
     pub fn set_feed_image(&self, id: i64, path: Option<&str>) -> Result<(), String> {
         self.conn.lock().unwrap().execute("UPDATE feed_posts SET image_path=?2 WHERE id=?1", params![id, path]).map_err(e)?; Ok(())
@@ -98,11 +103,24 @@ impl Db {
         c.execute("DELETE FROM feed_comments WHERE post_id=?1", params![id]).map_err(e)?;
         c.execute("DELETE FROM feed_posts WHERE id=?1", params![id]).map_err(e)?; Ok(())
     }
+    #[allow(dead_code)] // kept for older callers and tests; the command uses add_feed_comment_as
     pub fn add_feed_comment(&self, post_id: i64, from_user: bool, content: &str) -> Result<FeedComment, String> {
+        self.add_feed_comment_as(post_id, from_user, "", content)
+    }
+    /// v1.3: a comment by another character (author_id), or the owner / user ("").
+    pub fn add_feed_comment_as(&self, post_id: i64, from_user: bool, author_id: &str, content: &str) -> Result<FeedComment, String> {
         let c = self.conn.lock().unwrap();
         let t = now();
-        c.execute("INSERT INTO feed_comments(post_id,from_user,content,created_at) VALUES(?1,?2,?3,?4)", params![post_id, from_user as i64, content, t]).map_err(e)?;
-        Ok(FeedComment { id: c.last_insert_rowid(), post_id, from_user, content: content.into(), created_at: t })
+        let author = if from_user { "" } else { author_id };
+        c.execute("INSERT INTO feed_comments(post_id,from_user,content,created_at,author_id) VALUES(?1,?2,?3,?4,?5)", params![post_id, from_user as i64, content, t, author]).map_err(e)?;
+        Ok(FeedComment { id: c.last_insert_rowid(), post_id, from_user, content: content.into(), created_at: t, author_id: author.into() })
+    }
+    /// v1.3: which characters liked a post (deduplicated, order kept).
+    pub fn set_feed_likes(&self, id: i64, likes: &[String]) -> Result<Vec<String>, String> {
+        let mut out: Vec<String> = vec![];
+        for l in likes { if !l.is_empty() && !out.contains(l) { out.push(l.clone()); } }
+        self.conn.lock().unwrap().execute("UPDATE feed_posts SET likes=?2 WHERE id=?1", params![id, serde_json::to_string(&out).map_err(e)?]).map_err(e)?;
+        Ok(out)
     }
 
     /// Every picture this character has sent: 1:1 chat, group chats and feed posts, newest first.
@@ -146,7 +164,8 @@ type R<T> = Result<T, String>;
 #[tauri::command] pub fn set_feed_reaction(db: State<Db>, id: i64, reaction: String) -> R<()> { db.set_feed_reaction(id, &reaction) }
 #[tauri::command] pub fn mark_feed_read(db: State<Db>) -> R<()> { db.mark_feed_read() }
 #[tauri::command] pub fn delete_feed_post(db: State<Db>, id: i64) -> R<()> { db.delete_feed_post(id) }
-#[tauri::command] pub fn add_feed_comment(db: State<Db>, post_id: i64, from_user: bool, content: String) -> R<FeedComment> { db.add_feed_comment(post_id, from_user, &content) }
+#[tauri::command] pub fn add_feed_comment(db: State<Db>, post_id: i64, from_user: bool, content: String, author_id: Option<String>) -> R<FeedComment> { db.add_feed_comment_as(post_id, from_user, author_id.as_deref().unwrap_or(""), &content) }
+#[tauri::command] pub fn set_feed_likes(db: State<Db>, id: i64, likes: Vec<String>) -> R<Vec<String>> { db.set_feed_likes(id, &likes) }
 #[tauri::command] pub fn list_album(db: State<Db>, character_id: String) -> R<Vec<AlbumItem>> { db.list_album(&character_id) }
 #[tauri::command] pub fn remove_album_item(db: State<Db>, source: String, ref_id: i64) -> R<()> { db.remove_album_item(&source, ref_id) }
 
@@ -195,5 +214,22 @@ mod tests {
         assert_eq!(db.list_album(&c.id).unwrap().len(), 1);
         db.delete_feed_post(p.id).unwrap();
         assert!(db.list_feed(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn feed_likes_and_comment_authors() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(dir.path().to_path_buf()).unwrap();
+        let p = db.add_feed_post("mira", "new tea blend!", None).unwrap();
+        assert!(p.likes.is_empty());
+        assert_eq!(db.set_feed_likes(p.id, &["rex".into(), "rex".into(), "".into(), "elowen".into()]).unwrap(), vec!["rex", "elowen"]);
+        db.add_feed_comment_as(p.id, false, "rex", "save me a cup").unwrap();
+        db.add_feed_comment(p.id, false, "always!").unwrap();
+        let mine = db.add_feed_comment_as(p.id, true, "rex", "me too").unwrap();
+        assert_eq!(mine.author_id, "", "user comments never carry a character author");
+        let f = &db.list_feed(10).unwrap()[0];
+        assert_eq!(f.likes, vec!["rex", "elowen"]);
+        let authors: Vec<&str> = f.comments.iter().map(|c| c.author_id.as_str()).collect();
+        assert_eq!(authors, vec!["rex", "", ""]);
     }
 }

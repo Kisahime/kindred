@@ -35,6 +35,8 @@ import {
 } from "./scenephoto";
 import { ActionText, GiftPicker, GroupMeetDialog, GroupMeetResult, GroupPlanCard, MarkerLine, SceneBackdrop, SceneBanner } from "./TogetherUI";
 import { profile as currentProfile } from "./profile";
+import { noteOuting } from "./world";
+import { canPicture } from "./protect";
 
 const GROUP_COLORS = ["#f6a5c0", "#7fb8ff", "#b9a3f0", "#9fe3b0", "#ffd27f", "#ff9f8a", "#9fd0f2"];
 
@@ -264,7 +266,7 @@ export function GroupPane({ g, chars, me, onEdit, onCharUpdated, onBanner, scene
       } else {
         // a selfie request goes to the member it names
         const target = addressedMembers(userMsg.content, live)[0];
-        const intent = target ? await detectSelfie(target, me.userName, userMsg.content).catch(() => ({ selfie: false, scene: "" })) : { selfie: false, scene: "" };
+        const intent = target && canPicture(target) ? await detectSelfie(target, me.userName, userMsg.content).catch(() => ({ selfie: false, scene: "" })) : { selfie: false, scene: "" };
         const setup = intent.selfie && target ? await selfieSetup(target) : null;
         const ready = setup && "params" in setup ? setup.params : null;
         let responders = await pickResponders(live, userMsg.content, history(), me.userName, api.ollamaJson);
@@ -372,6 +374,7 @@ export function GroupPane({ g, chars, me, onEdit, onCharUpdated, onBanner, scene
       push(saved);
       setWrapUp(false);
       if (!r) { onBanner("The group outing ended, but the recap couldn't be written."); return; }
+      noteOuting(att, s.place, r.recap).catch((e) => console.warn("[relations]", e));
       const day = new Date().toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" });
       for (const c of att) {
         const mr = r.members[c.id];
@@ -427,7 +430,7 @@ export function GroupPane({ g, chars, me, onEdit, onCharUpdated, onBanner, scene
     if (intent.kind === "group" && intent.includeUser && !look.trim()) {
       onBanner(`For group photos with you in them, add "My appearance for photos" in your profile (click your picture, top left). Taking one of the group for now.`);
     }
-    const setup = await selfieSetup(lead);
+    const setup = await selfieSetup(lead, "place"); // only engine settings here; who may be in the picture is decided by the photo builders (protected characters never are)
     if ("reason" in setup) {
       onBanner(`${lead.name} can't take photos yet: ${setup.reason}. Pick a working model in Image Studio (\u{1F3A8}).`);
       return;
@@ -683,7 +686,7 @@ export function GroupPane({ g, chars, me, onEdit, onCharUpdated, onBanner, scene
               {photoMenu && (
                 <div className="photo-menu">
                   <button onClick={() => { setPhotoMenu(false); groupScenePhotoButton({ kind: "group", includeUser: false }); }}>
-                    {"\u{1F4F8}"} Group photo ({activeMembers.map((m) => m.name).join(", ")})
+                    {"\u{1F4F8}"} Group photo ({activeMembers.filter(canPicture).map((m) => m.name).join(", ") || "just the place"})
                   </button>
                   {hasLook ? (
                     <button onClick={() => { setPhotoMenu(false); groupScenePhotoButton({ kind: "group", includeUser: true }); }}>
@@ -694,7 +697,7 @@ export function GroupPane({ g, chars, me, onEdit, onCharUpdated, onBanner, scene
                       {"\u{1F46F}"} With me: add your look first{"\u2026"}
                     </button>
                   )}
-                  {activeMembers.map((m) => (
+                  {activeMembers.filter(canPicture).map((m) => (
                     <button key={m.id} onClick={() => { setPhotoMenu(false); groupScenePhotoButton({ kind: "member", target: m }); }}>
                       {"\u{1F4F7}"} Photo of {m.name}
                     </button>

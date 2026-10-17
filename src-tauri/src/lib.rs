@@ -7,6 +7,9 @@ mod life;
 mod voice;
 mod economy;
 mod databackup;
+mod world;
+mod cards;
+mod protect;
 
 use db::{Character, Db, Memory, Message, Settings};
 use groups::{Group, GroupMessage};
@@ -187,9 +190,11 @@ pub fn run() {
             imagegen::kv_get, imagegen::kv_set,
             voice::voice_info, voice::voice_start, voice::voice_stop, voice::voice_tts, voice::voice_stt, voice::set_call_active,
             life::list_milestones, life::add_milestone, life::delete_milestone, life::list_feed, life::add_feed_post, life::set_feed_image,
-            life::set_feed_reaction, life::mark_feed_read, life::delete_feed_post, life::add_feed_comment, life::list_album, life::remove_album_item, imagegen::list_images, imagegen::image_for_path, imagegen::delete_image, imagegen::open_images_folder,
+            life::set_feed_reaction, life::mark_feed_read, life::delete_feed_post, life::add_feed_comment, life::set_feed_likes, life::list_album, life::remove_album_item, imagegen::list_images, imagegen::image_for_path, imagegen::delete_image, imagegen::open_images_folder,
             economy::econ_balance, economy::econ_add, economy::econ_history, economy::econ_earned_since, economy::shop_get, economy::shop_set,
-            economy::shop_buy, economy::mall_checkout, economy::inventory_update_text, economy::inventory_list, economy::gift_item, economy::sell_item, economy::offer_create, economy::offer_list, economy::offer_resolve, databackup::backup_now, databackup::backup_auto, databackup::backup_list, databackup::backup_restore, databackup::backup_folder, economy::selfie_log
+            economy::shop_buy, economy::mall_checkout, economy::inventory_update_text, economy::inventory_list, economy::gift_item, economy::sell_item, economy::offer_create, economy::offer_list, economy::offer_resolve, databackup::backup_now, databackup::backup_auto, databackup::backup_list, databackup::backup_restore, databackup::backup_folder, economy::selfie_log,
+            world::letter_add, world::letters_list, world::letters_mark_read, world::letter_delete, world::letters_unread,
+            cards::card_read, cards::card_write
         ])
         .build(tauri::generate_context!())
         .expect("error while building Kindred")

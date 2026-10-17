@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Appearance, appearanceOf, Character, MIN_AGE } from "./types";
+import { ageRuleError, isProtectedMinor, PROTECTED_NOTE } from "./protect";
 import { imageApi, ModelFile } from "./imagegen";
 import { buildSelfiePrompt, timeSlot } from "./selfie";
 import { Spark } from "./Spark";
@@ -19,13 +20,20 @@ export function AppearanceEditor({ c, onChange, gen }: { c: Character; onChange:
   const txtPlain = (k: keyof Appearance, label: string, ph = "") =>
     <label>{label}<input value={a[k] as string} placeholder={ph} onChange={(e) => set(k, e.target.value as never)} /></label>;
   const models = files.filter((f) => f.kind === "model"), loras = files.filter((f) => f.kind === "lora");
+  const minor = isProtectedMinor(c);
+  const ageInput = <input type="number" min={1} max={99} value={a.age} onChange={(e) => set("age", Math.max(1, Math.min(99, Math.round(+e.target.value) || MIN_AGE)))} />;
   return (
     <div className="appearance-box">
       <button className="link" onClick={() => setOpen((o) => !o)}>{open ? "\u25BE" : "\u25B8"} Appearance &amp; selfies</button>
-      {open && <>
-        <small>Used when {c.name || "they"} sends you a selfie. Everyone is an adult: the minimum age is {MIN_AGE}.</small>
+      {open && minor && <>
+        <small>{PROTECTED_NOTE} Their looks and picture settings are not used.</small>
+        <div className="grid2"><label>Age{ageInput}</label></div>
+        {ageRuleError(c) && <div className="ed-error">{"\u26D4"} {ageRuleError(c)}</div>}
+      </>}
+      {open && !minor && <>
+        <small>Used when {c.name || "they"} sends you a selfie. Pictures are only ever of adults ({MIN_AGE}+). Under {MIN_AGE} is possible only for family (e.g. a son, daughter or younger sibling), who are protected and never pictured.</small>
         <div className="grid2">
-          <label>Age<Spark f="a.age" gen={gen} /><input type="number" min={MIN_AGE} max={99} value={a.age} onChange={(e) => set("age", Math.max(MIN_AGE, Math.min(99, Math.round(+e.target.value) || MIN_AGE)))} /></label>
+          <label>Age<Spark f="a.age" gen={gen} />{ageInput}</label>
           {txt("body", "Gender / body", "woman, slim, tall")}
           {txt("face", "Face, hair, eyes", "freckles, long auburn hair, green eyes")}
           {txt("features", "Distinguishing features", "round glasses, small nose stud")}

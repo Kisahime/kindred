@@ -79,8 +79,13 @@ const SEASON: Record<string, W[]> = {
   autumn: [{ e: "\u{1F342}", t: "crisp with falling leaves", lo: 9, hi: 14 }, { e: "\u{1F327}\uFE0F", t: "rainy", lo: 8, hi: 13, wet: true }, { e: "\u26C5", t: "bright and breezy", lo: 11, hi: 16 }, { e: "\u{1F32B}\uFE0F", t: "foggy", lo: 7, hi: 11 }, { e: "\u2601\uFE0F", t: "overcast", lo: 9, hi: 14 }],
 };
 export function seasonOf(d: Date): string { const m = d.getMonth(); return m <= 1 || m === 11 ? "winter" : m <= 4 ? "spring" : m <= 7 ? "summer" : "autumn"; }
+/** v1.3: real weather (weather.ts) while it's switched on and fresh; null = use the simulated weather below. */
+let liveWeather: (d: Date) => { emoji: string; text: string; temp: number; wet: boolean } | null = () => null;
+export const setLiveWeather = (f: (d: Date) => { emoji: string; text: string; temp: number; wet: boolean } | null) => { liveWeather = f; };
 /** Simple, believable weather, stable for a scene (seeded by scene id), by season and time of day. No internet. */
 export function weatherFor(seed: string, d: Date): { emoji: string; text: string; temp: number; wet: boolean } {
+  const live = liveWeather(d);
+  if (live) return live;
   const pool = SEASON[seasonOf(d)];
   const h = hash(seed);
   const w = pool[h % pool.length];

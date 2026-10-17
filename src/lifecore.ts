@@ -1,20 +1,22 @@
 // Relationships, daily schedules and milestones: pure helpers (no I/O, safe to import anywhere).
 import type { Character, Status } from "./types";
 import { toText } from "./text";
+import { isProtectedMinor, minorRoleOk } from "./protect";
 
-export type RelType = "friend" | "best friend" | "crush" | "partner" | "spouse" | "sibling" | "parent" | "child" | "cousin" | "grandparent" | "mentor" | "rival" | "custom";
+export type RelType = "friend" | "best friend" | "crush" | "partner" | "spouse" | "sibling" | "parent" | "child" | "cousin" | "grandparent" | "grandchild" | "nibling" | "mentor" | "rival" | "custom";
 export const REL_OPTIONS: { id: RelType; label: string; details?: string[] }[] = [
   { id: "friend", label: "Friend" }, { id: "best friend", label: "Best friend" }, { id: "crush", label: "Crush" },
   { id: "partner", label: "Girlfriend / boyfriend / partner", details: ["girlfriend", "boyfriend", "partner"] },
   { id: "spouse", label: "Spouse", details: ["wife", "husband", "spouse"] },
   { id: "sibling", label: "Sibling", details: ["sister", "brother", "sibling"] },
   { id: "parent", label: "Parent", details: ["mum", "dad", "parent"] },
-  { id: "child", label: "Adult child", details: ["daughter", "son", "child"] },
+  { id: "child", label: "Child (son / daughter)", details: ["daughter", "son", "child"] },
   { id: "cousin", label: "Cousin" }, { id: "grandparent", label: "Grandparent", details: ["grandma", "grandad", "grandparent"] },
+  { id: "grandchild", label: "Grandchild", details: ["granddaughter", "grandson", "grandchild"] }, { id: "nibling", label: "Niece / nephew", details: ["niece", "nephew"] },
   { id: "mentor", label: "Mentor" }, { id: "rival", label: "Rival" }, { id: "custom", label: "Custom\u2026" },
 ];
 export const ROMANTIC: RelType[] = ["crush", "partner", "spouse"];
-export const FAMILY: RelType[] = ["sibling", "parent", "child", "cousin", "grandparent"];
+export const FAMILY: RelType[] = ["sibling", "parent", "child", "cousin", "grandparent", "grandchild", "nibling"];
 export const isRomantic = (r: RelType) => ROMANTIC.includes(r);
 export const isFamily = (r: RelType) => FAMILY.includes(r);
 
@@ -52,6 +54,8 @@ export function lifeOf(c: Pick<Character, "life">): Life {
   const raw = (c.life ?? {}) as Partial<Life>;
   const l = { ...blankLife(), ...raw };
   if (!REL_OPTIONS.some((o) => o.id === l.relationship)) l.relationship = "friend";
+  // backstop for inconsistent data: a protected (under-18) character is always family, never evolves, no proposals
+  if (isProtectedMinor(c as never)) { if (!minorRoleOk(l.relationship)) l.relationship = "child"; l.canEvolve = false; l.proposal = null; l.petName = ""; }
   l.weekday = normalizeBlocks(l.weekday); l.weekend = normalizeBlocks(l.weekend);
   return l;
 }

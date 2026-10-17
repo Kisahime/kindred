@@ -224,6 +224,8 @@ const MIGRATIONS: &[(&str, &str, &str)] = &[
     ("images", "recorded", "INTEGER NOT NULL DEFAULT 1"),
     ("messages", "scene_id", "TEXT NOT NULL DEFAULT ''"),
     ("group_messages", "scene_id", "TEXT NOT NULL DEFAULT ''"),
+    ("feed_comments", "author_id", "TEXT NOT NULL DEFAULT ''"),
+    ("feed_posts", "likes", "TEXT NOT NULL DEFAULT '[]'"),
 ];
 
 /// All tables + column migrations (start-up and after a restore).
@@ -234,6 +236,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), String> {
     crate::imagegen::init_schema(conn).map_err(e)?;
     crate::life::init_schema(conn).map_err(e)?;
     crate::economy::init_schema(conn).map_err(e)?;
+    crate::world::init_schema(conn).map_err(e)?;
     migrate(conn).map_err(e)
 }
 

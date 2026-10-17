@@ -5,6 +5,7 @@ import { appearanceOf, Appearance, blankCharacter, Character, hasLooks, MIN_AGE,
 import { isFamily, isRomantic, lifeOf, Life, REL_OPTIONS, RelType, relationLabel } from "./lifecore";
 
 import { toText } from "./text";
+import { isProtectedMinor } from "./protect";
 export { toText };
 let callJson: JsonCaller = api.ollamaJson;
 export const setGenJsonCaller = (f: JsonCaller) => { callJson = f; };
@@ -103,7 +104,8 @@ export function contextOf(c: Character, user: string, skip?: GenField): string {
 export function rulesFor(c: Character, user: string): string {
   const r = lifeOf(c).relationship;
   return [
-    `All characters are adults (${MIN_AGE}+). Appearance text is for wholesome photos: tasteful, non-sexual, no nudity or lingerie.`,
+    isProtectedMinor(c) ? `This character is under 18 (${appearanceOf(c).age}), ${user}'s family: age-appropriate, wholesome and strictly platonic. Never romantic, flirty or sexual.`
+      : `All characters are adults (${MIN_AGE}+). Appearance text is for wholesome photos: tasteful, non-sexual, no nudity or lingerie.`,
     isFamily(r) ? `They are ${user}'s ${relationLabel(lifeOf(c))}: family, so nothing romantic, flirty or sexual.` : isRomantic(r) ? "The relationship is romantic, sweet and tasteful." : "The relationship is platonic.",
     "Use British English. Write original content; do not copy existing fictional characters.",
   ].join(" ");
@@ -134,6 +136,7 @@ const interpret = (f: GenField, raw: any) => cleanValue(f, raw && typeof raw ===
 /** Is this slot value too close to one of the other time slots? */
 export function clashes(c: Character, f: GenField, v: string) { return slotOthers(c, f).some((o) => similarity(o.text, v) >= TOO_SIMILAR); }
 export async function generateField(c: Character, user: string, f: GenField): Promise<Character> {
+  if (f.startsWith("a.") && isProtectedMinor(c)) throw new Error(`${c.name || "They"} ${c.name ? "is" : "are"} under 18 and protected: no looks or picture settings`);
   let v = interpret(f, parseJson(await callJson(c.model, buildFieldPrompt(c, user, f), tempFor(f), sampling())));
   if (slotOf(f) && (v === undefined || clashes(c, f, String(v)))) {
     const retry = interpret(f, parseJson(await callJson(c.model, buildFieldPrompt(c, user, f, true), 1.0, sampling())));
@@ -197,12 +200,14 @@ export async function generateWhole(idea: string, c: Character, user: string, ov
   }
   if (!raw || typeof raw !== "object") throw new Error("the model didn't return a character, try again");
   let out = applyWhole(base, raw, overwrite);
-  const age = ideaAge(idea);
+  const minor = isProtectedMinor(base);
+  if (minor) out = { ...out, appearance: base.appearance, life: { ...lifeOf(out), relationship: lifeOf(base).relationship, relationshipDetail: lifeOf(base).relationshipDetail } }; // protected: looks and family role stay as they are
+  const age = minor ? undefined : ideaAge(idea);
   if (age && (overwrite || !keep?.includes("a.age"))) out = setField(out, "a.age", age);
   if (idea.trim() && out.backstory.trim()) out = await fitIdea(out, idea, user).catch(() => out);
   if (overwrite && keep) for (const k of keep) out = k === "name" ? { ...out, name: base.name } : setField(out, k, getField(base, k));
   // distinct times of day: regenerate any slot that repeats an earlier one
-  for (const kind of ["outfit", "place"] as const) for (const s of SLOTS.slice(1)) {
+  if (!minor) for (const kind of ["outfit", "place"] as const) for (const s of SLOTS.slice(1)) {
     const f = `a.${kind}${s}` as GenField;
     const v = String(getField(out, f) ?? "");
     const earlier = SLOTS.slice(0, SLOTS.indexOf(s)).map((x) => String(getField(out, `a.${kind}${x}` as GenField) ?? ""));

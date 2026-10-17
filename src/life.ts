@@ -7,8 +7,8 @@ import { buildSystemPrompt, Character, StoredMessage, toModelText } from "./type
 import { isRomantic, lifeOf, Life, normalizeBlocks, relationLabel, UnlockKind } from "./lifecore";
 
 export interface Milestone { id: number; characterId: string; kind: string; title: string; data: string; createdAt: number; }
-export interface FeedComment { id: number; postId: number; fromUser: boolean; content: string; createdAt: number; }
-export interface FeedPost { id: number; characterId: string; content: string; imagePath: string | null; reaction: string; createdAt: number; isUnread: boolean; comments: FeedComment[]; }
+export interface FeedComment { id: number; postId: number; fromUser: boolean; content: string; createdAt: number; /** v1.3: another character ("" = owner) */ authorId?: string; }
+export interface FeedPost { id: number; characterId: string; content: string; imagePath: string | null; reaction: string; createdAt: number; isUnread: boolean; comments: FeedComment[]; /** v1.3: characters who liked it */ likes?: string[]; }
 export interface AlbumItem { source: "chat" | "group" | "feed"; refId: number; groupId: string | null; path: string; caption: string; createdAt: number; }
 export type FeedFrequency = "off" | "rarely" | "sometimes" | "often";
 export interface FeedConfig { frequency: FeedFrequency; }
@@ -26,7 +26,8 @@ export const lifeApi = {
   setFeedReaction: (id: number, reaction: string) => invoke<void>("set_feed_reaction", { id, reaction }),
   markFeedRead: () => invoke<void>("mark_feed_read"),
   deleteFeedPost: (id: number) => invoke<void>("delete_feed_post", { id }),
-  addFeedComment: (postId: number, fromUser: boolean, content: string) => invoke<FeedComment>("add_feed_comment", { postId, fromUser, content }),
+  addFeedComment: (postId: number, fromUser: boolean, content: string, authorId = "") => invoke<FeedComment>("add_feed_comment", { postId, fromUser, content, authorId }),
+  setFeedLikes: (id: number, likes: string[]) => invoke<string[]>("set_feed_likes", { id, likes }),
   listAlbum: (characterId: string) => invoke<AlbumItem[]>("list_album", { characterId }),
   removeAlbumItem: (source: string, refId: number) => invoke<void>("remove_album_item", { source, refId }),
   getFeedConfig: async (): Promise<FeedConfig> => ({ frequency: "sometimes", ...((await invoke<FeedConfig | null>("kv_get", { key: "feed_config" })) ?? {}) }),
@@ -104,8 +105,8 @@ export async function generateFeedPost(c: Character, user: string): Promise<{ po
   if (!post) throw new Error("no post text came back");
   return { post, photo: clip(raw?.photo, 120) };
 }
-export function buildCommentReplyPrompt(c: Character, user: string, post: FeedPost) {
-  const thread = post.comments.map((m) => `${m.fromUser ? user : c.name}: ${m.content}`).join("\n");
+export function buildCommentReplyPrompt(c: Character, user: string, post: FeedPost, names: Record<string, string> = {}) {
+  const thread = post.comments.map((m) => `${m.fromUser ? user : m.authorId ? names[m.authorId] ?? "A friend" : c.name}: ${m.content}`).join("\n");
   return [
     { role: "system", content: `${buildSystemPrompt(c, user)}\n\nYou posted this on your Messenger feed${post.imagePath ? " (with a photo)" : ""}: "${post.content}".\nComments so far:\n${thread}\n\nReply to ${user}'s latest comment with ONE short, natural comment. Output only the comment text.` },
     { role: "user", content: post.comments[post.comments.length - 1]?.content ?? "" },

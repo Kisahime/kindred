@@ -5,6 +5,7 @@ import { econApi, isAdultItem, JsonFn, setAdultFlag } from "./economy";
 import { MallItem, tierPrice, weekKey } from "./mall";
 import { parseJson } from "./mind";
 import { toText } from "./text";
+import { isProtectedMinor } from "./protect";
 import { listFor, typeItem, typeRules, typesFor } from "./itemtypes";
 
 export const ADULT_TAG = "18+";
@@ -134,6 +135,7 @@ export function storedAge(c: Character): number | null {
 export interface AdultCheck { ok: boolean; reason: string; warning: string; }
 export function adultGiftCheck(c: Character, enabled: boolean): AdultCheck {
   const rel = lifeOf(c).relationship;
+  if (isProtectedMinor(c)) return { ok: false, reason: `${c.name} is under 18 and protected. After Dark gifts can never go to them.`, warning: "" };
   if (!enabled) return { ok: false, reason: "Adult (18+) content is switched off in Options.", warning: "" };
   if (isFamily(rel)) return { ok: false, reason: `${c.name} is family. After Dark gifts can never go to family.`, warning: "" };
   const age = storedAge(c);

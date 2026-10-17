@@ -1,6 +1,7 @@
 // 🔗 Connected economy: gifts/café context everywhere, characters giving gifts back, and offers on Alex's items.
 // Pure decision helpers are exported for scripts/test-economy.mjs.
 import { invoke } from "@tauri-apps/api/core";
+import { isProtectedMinor } from "./protect";
 import { cafe, cafePrompt } from "./cafe";
 import { dayKey, econApi, giftsOf, giftsPrompt, isAdultItem, Item, SPARK, StockItem } from "./economy";
 import { CATALOG, itemTags, likedTags, MallItem } from "./mall";
@@ -42,7 +43,7 @@ export function generosity(c: Pick<Character, "personality" | "backstory">): num
 /** 18+ gifts only from partners (romantic, never family), only with the switch on, only adult (saved age 18+). */
 export function canGiveAdult(c: Character, adultOn: boolean): boolean {
   const rel = lifeOf(c).relationship;
-  return adultOn && isRomantic(rel) && !isFamily(rel) && (storedAge(c) ?? 0) >= 18;
+  return adultOn && isRomantic(rel) && !isFamily(rel) && !isProtectedMinor(c) && (storedAge(c) ?? 0) >= 18;
 }
 const BASE: Record<Freq, { gift: number; offer: number; giftGapDays: number; offerGapDays: number; perDay: number }> = {
   rarely: { gift: 0.06, offer: 0.04, giftGapDays: 7, offerGapDays: 14, perDay: 1 },

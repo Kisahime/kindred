@@ -1,6 +1,7 @@
 import { AppearanceEditor } from "./AppearanceEditor";
 import { LifeEditor } from "./LifeEditor";
 import { VoiceSettings } from "./VoiceSettings";
+import { RelationsEditor } from "./WorldUI";
 import { lifeOf } from "./lifecore";
 import { useRef, useState } from "react";
 import { GenField, generateField, generateWhole, getField, setField, WHOLE } from "./autogen";
@@ -12,6 +13,8 @@ import { selfieSetup, withPrompt } from "./selfie";
 import { generateImage } from "./imagegen";
 import { open as openDialog, save as saveDialog, ask } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
+import { cardsApi, toV2Card } from "./cards";
+import { ageRuleError, isProtectedMinor, PROTECTED_NOTE } from "./protect";
 import { Avatar } from "./Avatar";
 import { buildSystemPrompt, Character, Frequency, Mood, MOOD_EMOJI, MOODS, Status, statusLabel } from "./types";
 
@@ -116,6 +119,8 @@ export function Editor({ initial, models, userName, onSaved, onDeleted, onClose,
 
   const save = async () => {
     if (!c.name.trim()) { setErr("Please give your contact a name."); return; }
+    const bad = ageRuleError(c);
+    if (bad) { setErr(bad); return; }
     try { onSaved(await api.saveCharacter({ ...c, name: c.name.trim() })); } catch (e) { setErr(String(e)); }
   };
 
@@ -134,6 +139,17 @@ export function Editor({ initial, models, userName, onSaved, onDeleted, onClose,
     try {
       const p = await saveDialog({ defaultPath: `${initial.name}.character.json`, filters: [{ name: "Character", extensions: ["json"] }] });
       if (p) await api.exportCharacter(initial.id, p);
+    } catch (e) { setErr(String(e)); }
+  };
+
+  /** v1.3: share as a Tavern / SillyTavern V2 card (PNG with the card inside, or JSON). */
+  const exportCard = async () => {
+    try {
+      const p = await saveDialog({ defaultPath: `${initial.name}.card.png`, filters: [{ name: "Card picture (PNG)", extensions: ["png"] }, { name: "Card file (JSON)", extensions: ["json"] }] });
+      if (!p) return;
+      const path = /\.(png|json)$/i.test(p) ? p : `${p}.png`;
+      await cardsApi.write(path, toV2Card(initial), initial.avatarPath ?? null, initial.color);
+      setTplNote(`Card saved: ${path}`);
     } catch (e) { setErr(String(e)); }
   };
 
@@ -159,7 +175,8 @@ export function Editor({ initial, models, userName, onSaved, onDeleted, onClose,
               <Avatar big emoji={c.avatar} path={c.avatarPath} color={c.color} />
               <button className="link" onClick={pickImage}>Choose picture{"\u2026"}</button>
               {c.avatarPath && <button className="link" onClick={() => set("avatarPath", null)}>Use emoji</button>}
-              <button className="link" disabled={avatarBusy} onClick={genAvatar} title="Uses their appearance and image model (Image Studio queue)">{avatarBusy ? "Painting\u2026" : "\u2728 Generate avatar"}</button>
+              {isProtectedMinor(c) ? <small className="protected-note">{PROTECTED_NOTE}</small>
+                : <button className="link" disabled={avatarBusy} onClick={genAvatar} title="Uses their appearance and image model (Image Studio queue)">{avatarBusy ? "Painting\u2026" : "\u2728 Generate avatar"}</button>}
             </div>
             <div className="ed-grid">
               <label>Name<input value={c.name} autoFocus onChange={(e) => set("name", e.target.value)} /></label>
@@ -214,6 +231,7 @@ export function Editor({ initial, models, userName, onSaved, onDeleted, onClose,
           <label>Example messages (one per line)<Spark f="exampleMessages" gen={gen} /><textarea rows={3} value={c.exampleMessages} onChange={(e) => set("exampleMessages", e.target.value)} /></label>
           <AppearanceEditor c={c} gen={gen} onChange={(a) => set("appearance", a)} />
           <LifeEditor c={c} userName={userName} gen={gen} onChange={(l) => set("life", l)} />
+          {!isNew && <RelationsEditor c={c} />}
           <VoiceSettings c={c} onChange={(a) => set("appearance", a)} onTestCall={isNew || !onTestCall ? undefined : async () => { try { const s = await api.saveCharacter({ ...c, name: c.name.trim() }); onSaved(s); onTestCall(s); } catch (e) { setErr(String(e)); } }} />
           <button className="link" onClick={() => setShowPrompt((s) => !s)}>{showPrompt ? "Hide" : "Preview"} system prompt</button>
           {showPrompt && <pre className="prompt-preview">{buildSystemPrompt(c, userName)}</pre>}
@@ -224,7 +242,8 @@ export function Editor({ initial, models, userName, onSaved, onDeleted, onClose,
         </div>
         <div className="modal-actions">
           {!isNew && <button className="danger" onClick={remove}>Delete</button>}
-          {!isNew && <button onClick={exportJson}>Export{"\u2026"}</button>}
+          {!isNew && <button onClick={exportJson} title="Full Kindred backup of this contact (.json)">Export{"\u2026"}</button>}
+          {!isNew && <button onClick={exportCard} title="Share as a Tavern / SillyTavern character card (PNG or JSON)">Export card{"\u2026"}</button>}
           <button onClick={() => { setTplName(c.name ? `${c.name} template` : ""); setTplNote(null); }} title="Reuse this personality for new contacts">Save as template</button>
           <span className="spacer" />
           <button onClick={onClose}>Cancel</button>

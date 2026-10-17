@@ -46,7 +46,7 @@ export function FeedPane({ chars, groups = [], me, version, posting, onAskPost, 
       const withMine = { ...p, comments: [...p.comments, mine] };
       patch(p.id, () => withMine);
       setReplying((r) => ({ ...r, [p.id]: true }));
-      const reply = (await streamChat(c.model, buildCommentReplyPrompt(c, me.userName, withMine) as never, { onToken: () => {} })).trim().replace(/^"|"$/g, "");
+      const reply = (await streamChat(c.model, buildCommentReplyPrompt(c, me.userName, withMine, Object.fromEntries(chars.map((x) => [x.id, x.name]))) as never, { onToken: () => {} })).trim().replace(/^"|"$/g, "");
       if (reply) { const theirs = await lifeApi.addFeedComment(p.id, false, reply); patch(p.id, (x) => ({ ...x, comments: [...x.comments, theirs] })); }
     } catch (e) { onBanner(`Comment failed: ${e instanceof Error ? e.message : e}`); }
     finally { setReplying((r) => ({ ...r, [p.id]: false })); }
@@ -58,7 +58,7 @@ export function FeedPane({ chars, groups = [], me, version, posting, onAskPost, 
     <div className="feed">
       <header className="chat-head feed-head">
         <div className="ch-info"><div className="ch-name">{"\u2728"} What's new</div>
-          <div className="c-pm">Status updates and photos from your contacts (only while the app is open, never in quiet hours).</div></div>
+          <div className="c-pm">Status updates and photos from your contacts, who also like and comment on each other's posts (only while the app is open, never in quiet hours).</div></div>
         <label className="model-pick">How often
           <select value={cfg.frequency} onChange={(e) => setFreq(e.target.value as FeedFrequency)}>
             <option value="off">Off</option><option value="rarely">Rarely (~3 h)</option><option value="sometimes">Sometimes (~1 h)</option><option value="often">Often (~25 min)</option>
@@ -101,7 +101,8 @@ export function FeedPane({ chars, groups = [], me, version, posting, onAskPost, 
               <div className="post-react">
                 {REACTIONS.map((e) => <button key={e} className={p.reaction === e ? "sel" : ""} onClick={() => react(p, e)}>{e}</button>)}
               </div>
-              {p.comments.map((m) => <div key={m.id} className={`comment${m.fromUser ? " mine" : ""}`}><b>{m.fromUser ? "You" : c.name}:</b> {me.emoticons ? convertSmileys(m.content) : m.content}</div>)}
+              {!!p.likes?.length && <div className="post-likes">{"\u2764\uFE0F"} Liked by {p.likes.map((id) => byId(id)?.name).filter(Boolean).join(", ")}</div>}
+              {p.comments.map((m) => { const who = m.authorId ? byId(m.authorId) : undefined; return <div key={m.id} className={`comment${m.fromUser ? " mine" : ""}${who ? " friend" : ""}`}><b>{m.fromUser ? "You" : who ? who.name : m.authorId ? "A friend" : c.name}:</b> {me.emoticons ? convertSmileys(m.content) : m.content}</div>; })}
               {replying[p.id] && <div className="typing">{c.name} is replying<span className="dots"><i/><i/><i/></span></div>}
               <div className="mem-add">
                 <input value={drafts[p.id] ?? ""} placeholder={"Write a comment\u2026"} onChange={(e) => setDrafts((d) => ({ ...d, [p.id]: e.target.value }))}

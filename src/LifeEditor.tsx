@@ -4,12 +4,14 @@ import { Block, BlockStatus, currentBlock, defaultSchedule, EVOLVE, isFamily, is
 import { generateSchedule } from "./life";
 import { Spark } from "./Spark";
 import type { GenCtl } from "./genctl";
+import { isProtectedMinor, MINOR_ROLES, relationChangeError } from "./protect";
 
 const STATUS_OPTS: BlockStatus[] = ["online", "away", "busy", "sleeping"];
 
 /** "Relationship & daily life" section of the contact editor. */
 export function LifeEditor({ c, userName, onChange, gen }: { c: Character; userName: string; onChange: (l: Life) => void; gen?: GenCtl }) {
-  const l = lifeOf(c);
+  const l = lifeOf({ life: c.life }); // as stored (no protect backstop), so the editor shows what will be saved
+  const minor = isProtectedMinor(c);
   const [open, setOpen] = useState(false);
   const [day, setDay] = useState<"weekday" | "weekend">("weekday");
   const [busy, setBusy] = useState(false);
@@ -32,16 +34,18 @@ export function LifeEditor({ c, userName, onChange, gen }: { c: Character; userN
       {open && <>
         <div className="row2">
           <label>Relationship to {userName || "you"}
-            <select value={l.relationship} onChange={(e) => { const r = e.target.value as RelType; const o = REL_OPTIONS.find((x) => x.id === r)!; set({ relationship: r, relationshipDetail: o.details?.[0] ?? "", proposal: null, relationshipSince: Date.now() }); }}>
-              {REL_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            <select value={l.relationship} onChange={(e) => { const r = e.target.value as RelType; const bad = relationChangeError(c, r); if (bad) { setNote(bad); return; } setNote(null); const o = REL_OPTIONS.find((x) => x.id === r)!; set({ relationship: r, relationshipDetail: o.details?.[0] ?? "", proposal: null, relationshipSince: Date.now(), ...(minor ? { canEvolve: false } : {}) }); }}>
+              {REL_OPTIONS.map((o) => <option key={o.id} value={o.id} disabled={minor && !(MINOR_ROLES as readonly string[]).includes(o.id)}>{o.label}</option>)}
             </select></label>
           {opt.details && <label>Called<select value={l.relationshipDetail} onChange={(e) => set({ relationshipDetail: e.target.value })}>
             {opt.details.map((d) => <option key={d} value={d}>{d}</option>)}</select></label>}
           {l.relationship === "custom" && <label>Describe it<Spark f="l.relationshipDetail" gen={gen} /><input value={l.relationshipDetail} placeholder="e.g. old flatmate from uni" onChange={(e) => set({ relationshipDetail: e.target.value })} /></label>}
         </div>
         <small>{isFamily(l.relationship) ? "Family: warm and caring, never romantic." : isRomantic(l.relationship) ? "Romantic: affectionate and a bit flirty." : "Platonic."}
-          {l.relationship === "child" && " Adult child only: pictures are always of adults (18+)."}</small>
-        <label className="check"><input type="checkbox" checked={l.canEvolve} disabled={!evolve} onChange={(e) => set({ canEvolve: e.target.checked })} />
+          {l.relationship === "child" && !minor && " Over 18: pictures are always of adults (18+). Under 18: set their age in Appearance and they become a protected family character."}
+          {minor && " Protected (under 18): family roles only."}</small>
+        {note && minor && <div className="ed-error">{"\u26D4"} {note}</div>}
+        <label className="check"><input type="checkbox" checked={l.canEvolve && !minor} disabled={!evolve || minor} onChange={(e) => set({ canEvolve: e.target.checked })} />
           Relationship can evolve {evolve ? <small>(at closeness {evolve.at}+ they may ask to become your {evolve.to})</small> : <small>(not for this type)</small>}</label>
         <div className="row2">
           <label>Their nickname for you<Spark f="l.nickname" gen={gen} /><input value={l.nickname} placeholder="unlocks at closeness 45" onChange={(e) => set({ nickname: e.target.value })} /></label>

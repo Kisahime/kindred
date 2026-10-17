@@ -1980,7 +1980,7 @@ dependencies = [
 
 [[package]]
 name = "kindred"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "base64 0.22.1",
  "futures-util",

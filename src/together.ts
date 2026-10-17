@@ -3,6 +3,7 @@
 import { currentBlock, isFamily, isRomantic, lifeOf, relationLabel } from "./lifecore";
 import type { Character, Mood } from "./types";
 import { MOODS } from "./types";
+import { isProtectedMinor } from "./protect";
 
 export type Activity = "date" | "hangout";
 export type SceneStatus = "active" | "paused" | "ended";
@@ -59,7 +60,7 @@ export function sceneLine(m: SceneMarker, name: string): string {
 
 /** Activity types allowed for this relationship: romantic "date" only for partners/crushes/spouses. */
 export function activityChoices(c: Pick<Character, "life">): Activity[] {
-  return isRomantic(lifeOf(c).relationship) ? ["date", "hangout"] : ["hangout"];
+  return isRomantic(lifeOf(c).relationship) && !isProtectedMinor(c as never) ? ["date", "hangout"] : ["hangout"];
 }
 
 /** Can they meet right now? Asleep or busy (schedule, or a busy/offline status) means no, with an in-character reason. */
@@ -73,7 +74,9 @@ export function canMeetNow(c: Pick<Character, "life" | "name" | "status">, now =
 }
 
 /** The in-person roleplay block that replaces the messenger framing while Together. */
-export function togetherPrompt(c: Pick<Character, "name" | "life" | "closeness">, user: string, scene: Pick<Scene, "place" | "activity">, adult: boolean): string {
+export function togetherPrompt(c: Pick<Character, "name" | "life" | "closeness">, user: string, scene0: Pick<Scene, "place" | "activity">, adult0: boolean): string {
+  const minor = isProtectedMinor(c as never);
+  const scene = minor ? { ...scene0, activity: "hangout" as Activity } : scene0, adult = adult0 && !minor;
   const l = lifeOf(c), r = l.relationship;
   const romantic = isRomantic(r);
   const affection = isFamily(r)
@@ -83,7 +86,7 @@ export function togetherPrompt(c: Pick<Character, "name" | "life" | "closeness">
       : `You're ${user}'s ${relationLabel(l)}: friendly and platonic, with warmth matching your closeness (${c.closeness}/100). No romance or flirting.`;
   const limits = adult && romantic
     ? "Content: you are both adults. Things may get suggestive if it fits, but always fade to black before anything explicit: never describe sexual acts or explicit nudity; skip ahead with a time cut instead."
-    : "Content: keep it wholesome. No sexual content.";
+    : minor ? "Content: you are under 18 and this is a family outing: strictly wholesome and platonic, nothing romantic or sexual at all." : "Content: keep it wholesome. No sexual content.";
   return [
     `RIGHT NOW YOU ARE TOGETHER IN PERSON with ${user}, not texting. Where / what: ${scene.place || "somewhere nice"} (${what(scene.activity)}).`,
     "Speak out loud and act in person, in first person. Put physical actions and expressions in *asterisks* (e.g. *smiles and nudges your arm*), and speech as plain text.",
@@ -378,8 +381,9 @@ export function groupSceneLine(m: SceneMarker, groupName: string, attendeeNames:
     : `\u{1F44B} The meet-up with ${groupName} ended${m.recap ? `: ${m.recap}` : ""}`;
 }
 
-export function groupTogetherPrompt(c: Pick<Character, "id" | "name" | "life" | "closeness">, groupName: string, attendees: Pick<Character, "id" | "name">[], user: string, scene: Pick<Scene, "place">): string {
+export function groupTogetherPrompt(c: Pick<Character, "id" | "name" | "life" | "closeness">, groupName: string, attendees: (Pick<Character, "id" | "name"> & { appearance?: unknown })[], user: string, scene: Pick<Scene, "place">): string {
   const others = attendees.filter((a) => a.id !== c.id).map((a) => a.name);
+  const kids = [c, ...attendees].filter((a, i, all) => isProtectedMinor(a as never) && all.findIndex((x) => x.id === a.id) === i).map((a) => a.name);
   const l = lifeOf(c);
   const rel = isFamily(l.relationship)
     ? `${user} is family (your ${relationLabel(l)}): warm, familiar and strictly platonic.`
@@ -392,9 +396,10 @@ export function groupTogetherPrompt(c: Pick<Character, "id" | "name" | "life" | 
     "Replies are short: one to three sentences, usually one action plus some speech. Leave room for everyone else to act too.",
     rel,
     "Content: keep the group outing wholesome and friendly. No explicit content.",
+    kids.length ? `${kids.join(" and ")} ${kids.length > 1 ? "are" : "is"} under 18: the whole outing is strictly family-friendly. Nothing romantic, flirtatious or sexual from anyone.` : "",
     `If the group outing is naturally wrapping up (everyone saying goodbye and heading home), finish that reply with the tag ${WRAP_TAG}. Otherwise never write it.`,
     "Stay in character, never mention being an AI or a language model.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function planTargets<T extends Pick<Character, "id" | "life" | "name" | "status">>(p: PlannedMeetup, members: T[]): T[] {

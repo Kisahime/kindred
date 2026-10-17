@@ -7,6 +7,7 @@ import { currentBlock, lifeOf } from "./lifecore";
 import { adultFlag, allGiftsOf, giftsOf, isAdultItem, Item, selfieGift } from "./economy";
 import { inferType, ITEM_TYPES, mentionsType, STALL_TYPES } from "./itemtypes";
 import { storedAge } from "./afterdark";
+import { isProtectedMinor, noPictureReason } from "./protect";
 import { DEFAULT_PARAMS, EngineInfo, GenParams, ImageConfig, imageApi, ImageMeta, ImageSource, ModelFile } from "./imagegen";
 
 export type Slot = "day" | "evening" | "night";
@@ -61,9 +62,13 @@ export function garmentText(it: Item): string {
 export const isLingerie = (it: Item) => { const ty = typeOfItem(it); return !!ty && LINGERIE.has(ty) && isAdultItem(it); };
 
 export interface SelfieOpts { wear?: Item | null; source?: ImageSource; }
+/** v1.3: season / real-weather tag for outdoor shots (weather.ts); "" indoors or when off. */
+let worldTag: (where: string, now: Date) => string = () => "";
+export const setSelfieWorldTag = (f: (where: string, now: Date) => string) => { worldTag = f; };
 export interface SelfiePrompt { prompt: string; negative: string; caption: string; outfit: string; place: string; adult: boolean; gift: string; }
 /** Prompt for one selfie: looks + outfit/setting for the time of day + mood + what was asked. A worn gift replaces the outfit, near the start. */
 export function buildSelfiePrompt(c: Character, request: string, now = new Date(), opts: SelfieOpts = {}): SelfiePrompt {
+  if (isProtectedMinor(c)) throw new Error(`No picture: ${noPictureReason(c)}.`);
   const a = appearanceOf(c);
   const cur = currentBlock(lifeOf(c), now);
   const slot: Slot = cur?.block.status === "sleeping" ? "night" : timeSlot(now);
@@ -87,6 +92,7 @@ export function buildSelfiePrompt(c: Character, request: string, now = new Date(
     lingerie ? "lingerie fully worn and fully covering, tasteful, elegant, non-explicit" : "",
     scene, MOOD_FACE[c.mood] ?? "", wear ? "" : `wearing ${outfit}`, extraGift, where,
     slot === "night" ? "night time, low light" : slot === "evening" ? "evening" : "daylight",
+    lingerie ? "" : worldTag(where, now),
     a.style, a.extraTags,
   ];
   const prompt = parts.map((x) => clean(x ?? "")).filter(Boolean).join(", ");
@@ -121,8 +127,9 @@ export async function detectSelfie(c: Character, userName: string, text: string)
   return interpretIntent(parseJson(raw));
 }
 
-/** Image parameters for this character, or why pictures aren't possible yet. */
-export async function selfieSetup(c: Character): Promise<{ params: GenParams } | { reason: string }> {
+/** Image parameters for this character, or why pictures aren't possible yet. `place` = a picture with no people in it (place backgrounds, place-only scene photos). */
+export async function selfieSetup(c: Character, purpose: "person" | "place" = "person"): Promise<{ params: GenParams } | { reason: string }> {
+  if (purpose === "person" && isProtectedMinor(c)) return { reason: noPictureReason(c) };
   let cfg: ImageConfig, info: EngineInfo, files: ModelFile[];
   try { [cfg, info] = await Promise.all([imageApi.getConfig(), imageApi.engineInfo()]); files = await imageApi.scan(cfg.extraFolders); }
   catch (e) { return { reason: `Image Studio isn't available (${e})` }; }

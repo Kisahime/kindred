@@ -10,6 +10,7 @@ import type { Item } from "./economy";
 import type { Slot } from "./selfie";
 import type { GenParams } from "./imagegen";
 import { findPlace, placeFromText } from "./places";
+import { canPicture, isProtectedMinor, NO_PEOPLE_NEG } from "./protect";
 import type { SceneCard } from "./places";
 
 const clean = (s: string) => s.replace(/[<>()[\]{}]/g, " ").replace(/\s+/g, " ").trim();
@@ -66,7 +67,17 @@ export function photoPose(c: Pick<Character, "life" | "closeness">): string {
 /** Shaped like SelfiePrompt so logSelfie() can write it to selfie.log. */
 export interface ScenePhoto { prompt: string; negative: string; caption: string; pair: boolean; outfit: string; place: string; adult: boolean; gift: string;
   /** The asked-for gift is worn in the picture. */ worn: boolean;
-  /** Why an asked-for gift isn't worn: "rules" (18+ off, age not saved 18+, family) or "public" (lingerie outside a private place). */ declined: "" | "rules" | "public"; }
+  /** Why an asked-for gift isn't worn: "rules" (18+ off, age not saved 18+, family) or "public" (lingerie outside a private place). */ declined: "" | "rules" | "public";
+  /** Place-only picture (no people): used when a protected (under-18) character is involved. */ noPeople?: boolean;
+  /** Characters drawn in a group photo (checked by the image guard). */ people?: string[]; }
+/** A photo of just the place, nobody in it (protected characters are never pictured). */
+export function placeOnlyShot(card: SceneCard & { placeId?: string }): ScenePhoto {
+  const slot: Slot = card.tod === "night" || card.tod === "late night" ? "night" : card.tod === "evening" ? "evening" : "day";
+  const b = placeBgPrompt(card.placeId, card.place, slot);
+  return { prompt: [b.prompt, card.outdoor ? card.weather.replace(/^\S+\s/, "").replace(/,\s*-?\d+\u00B0C/, "") : ""].map(clean).filter(Boolean).join(", "),
+    negative: [b.negative, NO_PEOPLE_NEG].join(", "), caption: `\u{1F4F8} The view ${atPlace(card.place)}`, pair: true, outfit: "", place: card.place,
+    adult: false, gift: "", worn: false, declined: "", noPeople: true, people: [] };
+}
 export const PRIVATE_PLACES = ["their_place", "your_place"];
 /** Selfie rules for wearing a gift in a scene photo, plus: never After Dark items with family. */
 export function wearAllowed(it: Item, c: Character, adultOn = adultFlag()): boolean {
@@ -79,6 +90,7 @@ export function wearAllowed(it: Item, c: Character, adultOn = adultFlag()): bool
  * Always adult-only and never nude/explicit.
  */
 export function scenePhotoPrompt(c: Character, card: SceneCard & { placeId?: string }, pair: boolean, look: string, now = new Date(), gift?: GiftShot, adultOn = adultFlag()): ScenePhoto {
+  if (isProtectedMinor(c)) return placeOnlyShot(card);
   const a = appearanceOf(c);
   const age = Math.max(MIN_AGE, a.age);
   const outfit0 = buildSelfiePrompt(c, "", now).outfit; // schedule outfit
@@ -110,7 +122,9 @@ export function scenePhotoPrompt(c: Character, card: SceneCard & { placeId?: str
 }
 export function scenePhotoParams(base: GenParams, c: Character, p: ScenePhoto): GenParams {
   const size = p.pair ? bgSize(base) : { width: base.width, height: base.height };
-  return { ...base, ...size, prompt: p.prompt, negative: [p.negative, base.negative].filter(Boolean).join(", "), meta: { source: "scene", characterId: c.id, gift: p.worn ? p.gift : "", adult: p.adult } };
+  if (p.noPeople) return { ...base, ...size, loras: [], prompt: p.prompt, negative: [p.negative, base.negative].filter(Boolean).join(", "), meta: { source: "scene", characterId: c.id, gift: "", adult: false, noPeople: true } };
+  return { ...base, ...size, prompt: p.prompt, negative: [p.negative, base.negative].filter(Boolean).join(", "),
+    meta: { source: "scene", characterId: isProtectedMinor(c) ? undefined : c.id, gift: p.worn ? p.gift : "", adult: p.adult, people: p.people ?? [c.id] } };
 }
 /** Note for the reply that goes with a scene photo (mirrors selfieNote). */
 export function photoNote(user: string, pair: boolean, shot?: Pick<ScenePhoto, "worn" | "declined" | "gift" | "adult">): string {
@@ -175,10 +189,13 @@ function joinNames(names: string[]): string {
  * Uses landscape dimensions (`pair: true`), adult minimum ages, schedule outfits, and adult-only negative prompts.
  */
 export function groupScenePhotoPrompt(
-  attendees: Character[], card: SceneCard & { placeId?: string }, includeUser: boolean, userLook: string, now = new Date()
+  attendees0: Character[], card: SceneCard & { placeId?: string }, includeUser: boolean, userLook: string, now = new Date()
 ): ScenePhoto {
-  if (attendees.length <= 1 && attendees[0]) {
-    return scenePhotoPrompt(attendees[0], card, includeUser, userLook, now);
+  // protected (under-18) characters are never in the picture; only them (and the user) present = the place on its own
+  const attendees = attendees0.filter(canPicture);
+  if (!attendees.length) return placeOnlyShot(card);
+  if (attendees.length === 1) {
+    return { ...scenePhotoPrompt(attendees[0], card, includeUser, userLook, now), people: [attendees[0].id] };
   }
   const me = clean(userLook).slice(0, 200);
   const withMe = includeUser && !!me;
@@ -211,7 +228,7 @@ export function groupScenePhotoPrompt(
   const caption = `\u{1F4F8} ${whoLabel} ${atPlace(card.place)}`;
   return {
     prompt, negative, caption, pair: true, outfit: "group outfits", place: card.place,
-    adult: false, gift: "", worn: false, declined: "",
+    adult: false, gift: "", worn: false, declined: "", people: attendees.map((c) => c.id),
   };
 }
 

@@ -3,16 +3,20 @@ import assert from "node:assert/strict";
 import * as all from "../dist-test/all.js";
 const { selfie, typesMod } = all;
 const c = { ...typesMod.blankCharacter(), name: "Juniper", mood: "cosy", personality: "Gentle.", model: "qwen3:8b",
-  appearance: { age: 15, body: "woman, curvy", face: "curly dark hair, hazel eyes", outfitNight: "green plaid pyjamas", placeNight: "bedroom with fairy lights", style: "soft light" } };
+  appearance: { age: 17.9, body: "woman, curvy", face: "curly dark hair, hazel eyes", outfitNight: "green plaid pyjamas", placeNight: "bedroom with fairy lights", style: "soft light" } };
 const night = new Date(2026, 9, 12, 23, 30), day = new Date(2026, 9, 12, 10, 0);
+// v1.3: under 18 = protected family character, never pictured (was: clamped to 18)
+assert.throws(() => selfie.buildSelfiePrompt(c, "", night), /under 18 and protected/);
+c.appearance.age = 18;
 const p = selfie.buildSelfiePrompt(c, "holding a cup of tea <lora:x:1>", night);
-assert.match(p.prompt, /adult, 18 year old/, "age clamped to 18");
+assert.match(p.prompt, /adult, 18 year old/);
 assert.match(p.prompt, /green plaid pyjamas/); assert.match(p.prompt, /fairy lights/); assert.match(p.prompt, /cup of tea/);
 assert.doesNotMatch(p.prompt, /<lora/, "no prompt injection of lora tags");
 assert.match(p.negative, /underage/);
 const d = selfie.buildSelfiePrompt(c, "", day);
 assert.match(d.prompt, /casual everyday clothes/); assert.match(d.prompt, /daylight/);
-assert.equal(typesMod.appearanceOf({ appearance: { age: 3 } }).age, 18);
+assert.equal(typesMod.appearanceOf({ appearance: { age: 3 } }).age, 3, "protected characters keep their real age");
+assert.equal(typesMod.appearanceOf({ appearance: { age: 0 } }).age, 25); assert.equal(typesMod.appearanceOf({ appearance: {} }).age, 25);
 assert.deepEqual(selfie.interpretIntent({ selfie: true, scene: "waving" }), { selfie: true, scene: "waving" });
 assert.deepEqual(selfie.interpretIntent({ selfie: "no" }), { selfie: false, scene: "" });
 assert.match(typesMod.toModelText("[selfie] waving", false, "Alex", "Juniper"), /Juniper sent Alex a selfie photo: waving/);

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.0 (2026-10-17)
+
+**Living World**
+- **Character relationships (opt-in)**: in a character's editor, "People … knows" starts empty; add the people they know (acquaintance, friend, best friend, rival, crush, partner or family) and remove them again. Pairs are mutual, keep affinity, opinions and notes, and slowly evolve from world moments and shared group outings. Nothing is linked automatically; romance and family are only ever set by hand, and family is always platonic. Old auto-created, untouched pairs are cleaned up once on first start.
+- **Social feed**: linked characters like, comment on and reply to each other's posts and to your comments. Optional photo posts follow the selfie rules, with a daily limit. Switch and frequency in Options → Living world.
+- **Letters & diaries** (💌): characters who may message you first sometimes write letters, and you can write back; close characters keep a diary you can unlock. Saved in the local database.
+- **Real weather & seasons (opt-in)**: with the Options switch on and your town shared in your "Me" profile, characters know the current weather where you live (via Open-Meteo, cached for 30 minutes, with an offline fallback to the season). Weather and season feed into chats, scenes and photos.
+- **Seasonal events**: New Year, Valentine's Day, Halloween and Christmas messages and a small seasonal strip (Valentine's messages skip family).
+- **Character cards**: import Tavern/SillyTavern V1, V2 and V3 cards from PNG or JSON with a preview before saving (age must be 18+, or the card is imported as a protected family character; explicit text never goes into image prompts). Export any character as a V2 PNG card or JSON.
+
+**Protected under-18 family characters**
+- Characters under 18 are allowed only as family (son, daughter, child, younger sibling, niece/nephew, grandchild…), marked 🛡️ in the editor. Saving blocks a non-family relationship.
+- No pictures of them, ever: no selfies, avatar or appearance generation, feed photos or Image Studio prompts linked to them (also guarded in the image backend). Scene photos with them show only the place; group photos leave them out.
+- No romance or 18+ content, regardless of the 18+ switch: a firm wholesome-and-platonic block in their prompt, no dates (hangouts only), no adult gifts, platonic letters and seasonal messages, and character relations limited to friend, best friend, rival, acquaintance or family.
+- Card import: cards that appear to describe a minor can only be imported as a protected family character (with an age and family role, romantic/explicit lines removed and no card image); sexual or romantic minor cards are refused, and the triggering words are shown.
+
+**Theme cleanup**
+- All new v1.3 views (feed comments, letters and diaries, the seasonal strip, card import, the "People … knows" rows and the protected note) use the theme colours, so they match every theme (default, night, pastel, mint).
+
 ## 1.2.1 (2026-10-16)
 
 - Scene and group photo captions/prompts no longer say "at the the …", and skip "the" for personal places ("at Mira's flat", "at my place").

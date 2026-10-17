@@ -1,5 +1,6 @@
 // Image generation API + types. Also the hook for characters sending selfies later.
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { imageGuard } from "./protect";
 
 export interface Lora { path: string; strength: number; }
 export interface GenParams {
@@ -10,7 +11,9 @@ export interface GenParams {
   meta?: ImageMeta;
 }
 export type ImageSource = "studio" | "selfie" | "avatar" | "album" | "place" | "scene";
-export interface ImageMeta { source: ImageSource; characterId?: string; gift?: string; adult?: boolean; }
+export interface ImageMeta { source: ImageSource; characterId?: string; gift?: string; adult?: boolean;
+  /** Characters drawn in the picture (group photos); and true for pictures with no people at all (checked by the protect guard, here and in Rust). */
+  people?: string[]; noPeople?: boolean; }
 export interface ModelFile { path: string; name: string; kind: "model" | "lora" | "vae" | "text_encoder"; sizeMb: number; arch: string; note: string; }
 export interface EngineInfo { ok: boolean; version: string; samplers: string[]; schedulers: string[]; clipSkip: boolean; error: string; }
 export interface Progress { phase: "queued" | "unloading" | "loading" | "sampling" | "decoding" | "log"; step: number; total: number; line: string; }
@@ -47,6 +50,8 @@ export const imageApi = {
 
 /** Runs one job (queued behind any chat). Resolves with the saved images. */
 export function generateImage(params: GenParams, onProgress: (p: Progress) => void): Promise<ImageRow[]> {
+  const refused = imageGuard(params);
+  if (refused) return Promise.reject(new Error(refused));
   const ch = new Channel<Progress>();
   ch.onmessage = onProgress;
   return invoke<ImageRow[]>("sd_generate", { params, onProgress: ch });

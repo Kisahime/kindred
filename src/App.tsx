@@ -38,6 +38,12 @@ import { Activity, closenessAfter, detectWrap, firstMilestone, newScene, parseSc
 import { parseJson } from "./mind";
 import { isBirthday, profile as currentProfile, profileApi, UserProfile } from "./profile";
 import { ConnectedOptions, DataBackups } from "./OptionsExtra";
+import { countFeedPhoto, feedPhotoAllowed, installWorldPrompts, loadRelations, loadWorld } from "./world";
+import { SeasonDecor, WorldOptions } from "./WorldUI";
+import { installWeather } from "./weather";
+import { LettersPane } from "./LettersPane";
+import { lettersApi } from "./letters";
+import { worldTick } from "./worldtick";
 import { backupApi } from "./databackup";
 import { economyContext, freshDay, giftBackNote, giftBubble, loadConnected, Offer, offerApi, offerBubble, offerNote, occasionsDue, pickOffer, pickReturnGift, resolveNote, shouldGift, connectedCfg, offerTarget, offerMemory } from "./connected";
 import { adultFlag, dayKey, emitWallet } from "./economy";
@@ -48,6 +54,9 @@ import { generateImage, GenParams, reuseParams } from "./imagegen";
 import { listen } from "@tauri-apps/api/event";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as autostartEnabled } from "@tauri-apps/plugin-autostart";
 import { ChatMessage, listModels, streamChat } from "./ollama";
+import { CardImport } from "./CardImport";
+import { installProtect, isProtectedMinor } from "./protect";
+import { CardData, CardFile, CardSpec, cardsApi, parseCard } from "./cards";
 import { generateProactive, inQuietHours, nextDelay, skipReason } from "./proactive";
 import { CALL, CallLog, fmtDuration, isEventText, OFFER, parseCall } from "./types";
 import { blankCharacter, buildSystemPrompt, Character, closenessLabel, Group, MOOD_EMOJI, NUDGE, Settings, SELFIE, selfieScene, Status, statusLabel, StoredMessage, Theme, THEMES, toModelText, appearanceOf } from "./types";
@@ -89,8 +98,11 @@ export default function App() {
   const [models, setModels] = useState<string[]>([]);
   const [modelError, setModelError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Character | null>(null);
+  const [cardImport, setCardImport] = useState<{ path: string; file: CardFile; spec: CardSpec; data: CardData } | null>(null);
   const [options, setOptions] = useState(false);
   const [setup, setSetup] = useState(false);
+  useEffect(() => { loadWorld().catch(() => {}); loadRelations().catch(() => {}); installWeather(() => live.current.me.userName); installProtect(() => live.current.chars); }, []);
+  useEffect(() => { installWorldPrompts(chars, me.userName); }, [chars, me.userName]);
   useEffect(() => { econApi.kvGet<boolean>("setup_seen").then((seen) => { if (!seen) { setSetup(true); econApi.kvSet("setup_seen", true).catch(() => {}); } }).catch(() => {}); }, []);
   const [memoriesOf, setMemoriesOf] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
@@ -142,6 +154,11 @@ export default function App() {
   const [ringing, setRinging] = useState<Character | null>(null);
   const [feedVersion, setFeedVersion] = useState(0);
   const [feedUnread, setFeedUnread] = useState(0);
+  // v1.3: letters & diaries pane
+  const [lettersOpen, setLettersOpen] = useState(false);
+  const [lettersUnread, setLettersUnread] = useState(0);
+  const [lettersVersion, setLettersVersion] = useState(0);
+  useEffect(() => { lettersApi.unread().then((u) => setLettersUnread(u.letter ?? 0)).catch(() => {}); }, [lettersVersion]);
   const [posting, setPosting] = useState(false);
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const feedCfg = useRef<FeedConfig>({ frequency: "sometimes" });
@@ -395,6 +412,18 @@ export default function App() {
       await milestoneRewards(await lifeApi.listMilestones(null), names);
       await connectedTick().catch(log("connected economy"));
       await birthdayTick().catch(log("birthday"));
+      const ws = live.current.me;
+      await worldTick({ chars: live.current.chars, groups: live.current.groups, me: ws, log,
+        hush: ws.status === "offline" || ws.status === "busy" || inQuietHours(new Date(), ws.quietStart, ws.quietEnd) || live.current.onCall,
+        awake: (c) => c.status !== "offline" && currentBlock(lifeOf(c))?.block.status !== "sleeping",
+        generating: (c) => generating.current.has(c.id),
+        message: (c, note) => runProactive(c, true, false, note),
+        onLetter: (c, l) => {
+          setLettersVersion((v) => v + 1); play("proactive");
+          if (!document.hasFocus()) desktopNotify(`\u{1F48C} ${c.name} wrote you a letter`, l.title);
+          else setBanner(`\u{1F48C} ${c.name} wrote you a letter: "${l.title}". Open it with the envelope button.`);
+        },
+        inScene: (c) => inScene(c.id), onFeed: (isNew) => { setFeedVersion((v) => v + 1); if (isNew && !live.current.feedOpen) setFeedUnread((n) => n + 1); } }).catch(log("world"));
     })().catch(log("milestones"));
   };
 
@@ -412,11 +441,11 @@ export default function App() {
       setFeedVersion((v) => v + 1);
       if (!live.current.feedOpen) setFeedUnread((n) => n + 1);
       if (!document.hasFocus()) desktopNotify(`${c.name} posted an update`, post);
-      if (appearanceOf(c).selfiesUnprompted && Math.random() < (force ? 0.5 : 0.3)) {
+      if (appearanceOf(c).selfiesUnprompted && await feedPhotoAllowed(force)) {
         const setup = await selfieSetup(c);
         if ("params" in setup) {
           const rows = await generateImage(withPrompt(setup.params, byId(c.id) ?? c, scene || post, new Date(), { source: "album" }), () => {});
-          if (rows[0]) { await lifeApi.setFeedImage(row.id, rows[0].path); markFirstSelfie(c); setFeedVersion((v) => v + 1); }
+          if (rows[0]) { await lifeApi.setFeedImage(row.id, rows[0].path); markFirstSelfie(c); countFeedPhoto().catch(() => {}); setFeedVersion((v) => v + 1); }
         }
       }
     } catch (e) { if (force) setBanner(`${c.name} couldn't post: ${e instanceof Error ? e.message : e}`); else console.warn("[feed]", e); }
@@ -605,6 +634,8 @@ export default function App() {
   const speak = (c: Character, m: Msg) => speakMessage(c, m.text).catch((e) => setBanner(`Voice: ${e instanceof Error ? e.message : e}`));
 
   const openFeed = () => { setStudio(false); setEconOpen(false); setFeedOpen(true); setFeedUnread(0); };
+  const openLetters = () => { setStudio(false); setEconOpen(false); setFeedOpen(false); setActiveId(null); setActiveGroupId(null); setLettersOpen(true); };
+  useEffect(() => { if (studio || feedOpen || econOpen || activeId || activeGroupId) setLettersOpen(false); }, [studio, feedOpen, econOpen, activeId, activeGroupId]);
 
   // ---- chatting -----------------------------------------------------------
   const setList = (cid: string, f: (l: Msg[]) => Msg[]) => setChats((p) => ({ ...p, [cid]: f(p[cid] ?? []) }));
@@ -886,7 +917,7 @@ export default function App() {
     if ((!force && (bgsRef.current[key] || bgFailed.current.has(key))) || bgJobs.current.has(key) || live.current.onCall) return;
     bgJobs.current.add(key);
     try {
-      const setup = await selfieSetup(c);
+      const setup = await selfieSetup(c, "place");
       if ("reason" in setup) { bgFailed.current.add(key); if (force) setBanner(`No place picture: ${setup.reason}. Soft colours are used instead.`); return; }
       const rows = await generateImage(placeBgParams(setup.params, s.placeId, s.place, slot), () => {});
       if (!rows[0]) throw new Error("no picture came back");
@@ -927,8 +958,8 @@ export default function App() {
   const takeScenePhoto = async (c0: Character, pairWanted: boolean, shot: ScenePhoto | null) => {
     const c = byId(c0.id) ?? c0;
     if (!shot) return;
-    if (pairWanted && !shot.pair) setBanner(`For photos of you both, add "My appearance for photos" in your profile (click your picture, top left). Taking one of ${c.name} for now.`);
-    const setup = await selfieSetup(c);
+    if (pairWanted && !shot.pair && !shot.noPeople) setBanner(`For photos of you both, add "My appearance for photos" in your profile (click your picture, top left). Taking one of ${c.name} for now.`);
+    const setup = await selfieSetup(c, shot.noPeople ? "place" : "person");
     if ("reason" in setup) { setBanner(`${c.name} can't take photos yet: ${setup.reason}. Pick a working model in Image Studio (\u{1F3A8}).`); return; }
     setPhoto((p) => ({ ...p, [c.id]: true }));
     try {
@@ -980,7 +1011,7 @@ export default function App() {
     try { const s = await api.addMessage(c.id, "user", text); mine.dbId = s.id; patchMsg(c.id, mine.key, { dbId: s.id }); }
     catch (e) { setBanner(`Could not save message: ${e}`); }
     // Is she asking for a picture? (cheap JSON check with the chat model; any failure = no)
-    const intent = forceSelfie ? { selfie: true, scene: "" } : text === NUDGE || together ? { selfie: false, scene: "" }
+    const intent = isProtectedMinor(c) ? { selfie: false, scene: "" } : forceSelfie ? { selfie: true, scene: "" } : text === NUDGE || together ? { selfie: false, scene: "" }
       : await detectSelfie(c, me.userName, text).catch((e) => { console.warn("[selfie intent]", e); return { selfie: false, scene: "" }; });
     const setup = intent.selfie ? await selfieSetup(c) : null;
     const ready = setup && "params" in setup ? setup.params : null;
@@ -1145,8 +1176,13 @@ export default function App() {
 
   const importJson = async () => {
     try {
-      const f = await openDialog({ multiple: false, filters: [{ name: "Character", extensions: ["json"] }] });
-      if (typeof f === "string") { const c = await api.importCharacter(f); setChars((cs) => [...cs, c]); open(c); }
+      const f = await openDialog({ multiple: false, filters: [{ name: "Character or card", extensions: ["png", "json"] }] });
+      if (typeof f !== "string") return;
+      const file = await cardsApi.read(f);
+      const card = parseCard(file.json);
+      if (card.spec === "kindred" && file.kind === "json") { const c = await api.importCharacter(f); setChars((cs) => [...cs, c]); open(c); return; }
+      if (card.spec === "kindred") throw new Error("That picture holds a Kindred export; import the .json file instead.");
+      setCardImport({ path: f, file, ...card });
     } catch (e) { setBanner(`Import failed: ${e}`); }
   };
 
@@ -1167,6 +1203,7 @@ export default function App() {
               onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
           </div>
         </header>
+        <SeasonDecor />
         <div className="group-title">{"\u25BE"} Friends ({chars.filter((c) => c.status !== "offline").length}/{chars.length})</div>
         <ul className="contacts">
           {chars.map((c) => (
@@ -1198,8 +1235,9 @@ export default function App() {
         <div className="side-actions">
           <button onClick={() => setGallery(true)} title="Add a contact" aria-label="Add a contact">{"\u{1F464}\uFF0B"}</button>
           <button onClick={() => setEditingGroup(blankGroup())} title="New group chat" aria-label="New group chat">{"\u{1F465}\uFF0B"}</button>
-          <button onClick={importJson} title="Import a character (.json)" aria-label="Import a character">{"\u{1F4E5}"}</button>
+          <button onClick={importJson} title="Import a character (.json, or a Tavern / SillyTavern card .png / .json)" aria-label="Import a character">{"\u{1F4E5}"}</button>
           <button className={`feed-btn${feedOpen && !studio ? " sel" : ""}`} onClick={openFeed} title="What's new" aria-label="What's new">{"\u2728"}{feedUnread > 0 && <span className="badge">{feedUnread}</span>}</button>
+          <button className={`feed-btn${lettersOpen ? " sel" : ""}`} onClick={openLetters} title="Letters & diaries" aria-label="Letters and diaries">{"\u{1F48C}"}{lettersUnread > 0 && <span className="badge">{lettersUnread}</span>}</button>
           <button className={`feed-btn${econOpen && !studio ? " sel" : ""}`} onClick={() => { setStudio(false); setFeedOpen(false); setEconOpen(true); }} title={`Sparkles: caf\u00E9, shops & gifts${balance !== null ? ` (${balance} ${SPARK})` : ""}`} aria-label="Sparkles">{"\u{1F3EA}"}</button>
           <button className={studio ? "sel" : ""} onClick={() => setStudio(true)} title="Image Studio" aria-label="Image Studio">{"\u{1F3A8}"}</button>
           <button onClick={() => setOptions(true)} title="Options" aria-label="Options">{"\u2699"}</button>
@@ -1212,6 +1250,8 @@ export default function App() {
         {gpuBusy && !studio && <div className="banner info">{"\u{1F3A8}"} Image Studio is using the GPU, so replies will wait until the picture is done.</div>}
         {studio ? (
           <ImageStudio chars={chars} onCharUpdated={replaceChar} onBanner={setBanner} adult={adult} load={studioLoad} />
+        ) : lettersOpen ? (
+          <LettersPane chars={chars} me={me} version={lettersVersion} onBanner={setBanner} onRead={() => setLettersUnread(0)} onOpenChar={open} />
         ) : feedOpen ? (
           <FeedPane chars={chars} groups={groups} me={me} version={feedVersion} posting={posting} onAskPost={() => postUpdate(true)} onOpenChar={open}
             onOpenGroup={(g) => { setStudio(false); setFeedOpen(false); setEconOpen(false); setActiveGroupId(g.id); setActiveId(null); }}
@@ -1272,6 +1312,8 @@ export default function App() {
         <button className="primary" onClick={() => startCall(ringing, true)}>{"\u{1F4DE}"} Accept</button>
         <button className="hangup" onClick={() => { const c = ringing; setRinging(null); saveCallLog(c, { d: 0, missed: true, incoming: true, lines: [] }, true); }}>Decline</button>
       </div>}
+      {cardImport && <CardImport {...cardImport} userName={me.userName} adult={adult} models={models} taken={chars.map((x) => x.name)}
+        onClose={() => setCardImport(null)} onSaved={(c) => { setCardImport(null); setChars((cs) => [...cs, c]); open(c); }} />}
       {editing && <Editor takenNames={chars.map((x) => x.name)} onTestCall={(c) => { setEditing(null); setRinging(c); }} initial={editing} models={models} userName={me.userName} onSaved={onSaved} onDeleted={onDeleted}
         onClose={() => setEditing(null)} onTestProactive={(c, n) => runProactive(c, true, n)} />}
       {gallery && <TemplateGallery onClose={() => setGallery(false)} onPick={(d) => { setGallery(false); setEditing({ ...blankCharacter(), ...d, id: "", mood: d.baselineMood ?? "cosy" }); }} />}
@@ -1347,6 +1389,7 @@ function OptionsDialog({ me, onSave, onClose, adult, onAdult, onSetup }: { onSet
             Sounds
           </label>
           <ConnectedOptions />
+          <WorldOptions />
           <DataBackups />
           <button onClick={onSetup}>Setup checklist…</button>
           {s.sound && <>
@@ -1481,12 +1524,13 @@ function ChatPane(props: { c: Character; msgs: Msg[]; typing: boolean; models: s
             <button className="camera-btn" onClick={() => setPhotoMenu((x) => !x)} disabled={typing || photo} title="Take a photo here">{"\u{1F4F7}"}</button>
             <button className="gift-btn" onClick={onGiveInPerson} disabled={typing} title={`Give ${c.name} something in person`}>{"\u{1F381}"}</button>
             {photoMenu && <div className="photo-menu">
-              <button onClick={() => { setPhotoMenu(false); onScenePhoto(false); }}>{"\u{1F4F7}"} Photo of {c.name}</button>
+              {isProtectedMinor(c) ? <button onClick={() => { setPhotoMenu(false); onScenePhoto(false); }} title={`${c.name} is under 18 and protected: only the place is in the picture`}>{"\u{1F4F7}"} Photo of the place</button>
+              : <><button onClick={() => { setPhotoMenu(false); onScenePhoto(false); }}>{"\u{1F4F7}"} Photo of {c.name}</button>
               {hasLook ? <button onClick={() => { setPhotoMenu(false); onScenePhoto(true); }}>{"\u{1F46B}"} Photo of us both</button>
-                : <button onClick={() => { setPhotoMenu(false); onOpenMe(); }} title="Add 'My appearance for photos' in your profile first">{"\u{1F46B}"} Us both: add your look first{"\u2026"}</button>}
+                : <button onClick={() => { setPhotoMenu(false); onOpenMe(); }} title="Add 'My appearance for photos' in your profile first">{"\u{1F46B}"} Us both: add your look first{"\u2026"}</button>}</>}
             </div>}
           </span>
-          : <button className="camera-btn" onClick={onCamera} disabled={typing || photo} title={`Ask ${c.name} for a selfie`}>{"\u{1F4F7}"}</button>}
+          : isProtectedMinor(c) ? null : <button className="camera-btn" onClick={onCamera} disabled={typing || photo} title={`Ask ${c.name} for a selfie`}>{"\u{1F4F7}"}</button>}
           <button className="nudge-btn" onClick={doNudge} disabled={typing || cooldown > 0 || together} title="Send a nudge (shakes the window)">{cooldown > 0 ? `${cooldown}s` : "Nudge!"}</button>
         </div>
       </div>
